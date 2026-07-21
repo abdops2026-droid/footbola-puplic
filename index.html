@@ -2,7 +2,7 @@
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>FOOTBOLA</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -112,12 +112,9 @@
     <!-- NEWS FEED -->
     <div id="news-feed-wrap" style="padding:0 14px 14px">
       <div style="font-size:10px;font-weight:700;letter-spacing:2px;color:var(--sub);text-transform:uppercase;margin-bottom:8px">📰 Latest News</div>
-      <div id="news-filter-row" style="display:flex;gap:6px;margin-bottom:8px;overflow-x:auto"></div>
       <div id="news-feed" class="news-feed" style="padding:0;max-height:160px;overflow-y:auto"></div>
     </div>
-    <div id="admin-alerts-section" style="display:none"></div>
     <div class="t-list" id="tournament-list"></div>
-    <div id="recently-deleted-section" style="display:none"></div>
   </div>
 
   <!-- LOCKER TAB -->
@@ -141,15 +138,11 @@
         <div class="rule-icon">💰</div>
         <div class="rule-title">Market Value — القيمة السوقية</div>
         <div class="rule-txt">
-          All players start at <strong>€1M</strong>. Prices update automatically:<br>
+          All players start at <strong>€500K</strong>. Prices update automatically:<br>
           • Win: <strong style="color:var(--green)">+€100K</strong> | Draw: <strong>+€25K</strong> | Loss: <strong style="color:var(--red)">-€50K</strong><br>
           • Every Goal Scored: <strong style="color:var(--green)">+€50K</strong><br>
           • Man of the Match: <strong style="color:var(--gold)">+€200K</strong><br>
           • Red Card Penalty: <strong style="color:var(--red)">-€150K</strong><br>
-          • Yellow Card Penalty: <strong style="color:var(--red)">-€50K</strong><br>
-          • 🏆 Winning the Tournament: <strong style="color:var(--gold)">+€500K</strong><br>
-          • 🥾 Golden Boot (Top Scorer): <strong style="color:var(--gold)">+€300K</strong><br>
-          • ⭐ Golden Player (Best Average Rating): <strong style="color:var(--purple)">+€400K</strong><br>
           <em>Note: Value can never drop below €100K.</em>
         </div>
       </div>
@@ -158,7 +151,7 @@
         <div class="rule-icon">🌐</div>
         <div class="rule-title">Global ELO Rank — التصنيف العالمي</div>
         <div class="rule-txt">
-          Every player has an ELO rating (starts at 1000), visible in their profile. You steal ELO points from your opponent when you win. Beating a high-ranked player gives you more points than beating a low-ranked player. The <strong style="color:var(--text)">History</strong> tab shows a full log of past tournaments (winner, Golden Boot, Golden Player) instead of a live ranking.
+          The Hall of Fame is ranked by ELO (Starts at 1000). You steal ELO points from your opponent when you win. Beating a high-ranked player gives you more points than beating a low-ranked player.
         </div>
       </div>
 
@@ -174,7 +167,7 @@
         <div class="rule-icon">🏳️</div>
         <div class="rule-title">Walkover — الانسحاب</div>
         <div class="rule-txt">
-          Refusing to play or withdrawing from a match results in an automatic <strong style="color:var(--red)">3 - 0 Loss</strong>. The winning team receives full points in the standings, but the goals do not count toward individual player stats (Sniper progress, goal XP), and no MOTM voting opens for walkover matches.
+          If a player/team refuses to show up or withdraws, the Admin applies a Walkover from the <strong>Record Match Result</strong> screen ("Home Withdrew" / "Away Withdrew" buttons). This locks in an automatic <strong style="color:var(--red)">3 - 0 Loss</strong> for whoever withdrew — the opponent gets the full 3 points, the win, and the 3 goals as normal.
         </div>
       </div>
 
@@ -190,31 +183,7 @@
         <div class="rule-icon">⭐</div>
         <div class="rule-title">XP & Leveling System — نقاط الخبرة</div>
         <div class="rule-txt">
-          Score a goal = <strong style="color:var(--text)">+10 XP</strong>. Win = <strong style="color:var(--text)">+30 XP</strong> (per player). Win Cup = <strong style="color:var(--gold)">+200 XP</strong>. MOTM = <strong style="color:var(--purple)">+30 XP</strong>. 🥾 Golden Boot = <strong style="color:var(--gold)">+100 XP</strong>. ⭐ Golden Player = <strong style="color:var(--purple)">+150 XP</strong>.
-        </div>
-      </div>
-
-      <div class="rule-card pc">
-        <div class="rule-icon">🏅</div>
-        <div class="rule-title">Achievements & MOTM Voting — الألقاب والتصويت</div>
-        <div class="rule-txt">
-          🎩 <strong style="color:var(--text)">Hat-Trick</strong>: يُمنح تلقائيًا لأي لاعب يسجل 3 أهداف أو أكتر في مباراة واحدة. 🎯 <strong style="color:var(--text)">Sniper</strong>: يُمنح عند الوصول لـ50 هدف تراكمي مدى الحياة. تصويت <strong style="color:var(--gold)">Man of the Match</strong> مفتوح لأي مستخدم على أي مباراة (باستثناء التصويت لنفسك أو لشريكك في الفريق)، والتقييم بالنجوم إجباري لكل لاعب. اللاعب المطرود بكرت أحمر <strong style="color:var(--red)">لا يدخل التصويت خالص</strong> لتلك المباراة.
-        </div>
-      </div>
-
-      <div class="rule-card gc">
-        <div class="rule-icon">⭐</div>
-        <div class="rule-title">Golden Player — لقب أفضل لاعب في البطولة</div>
-        <div class="rule-txt">
-          يُمنح تلقائيًا عند نهاية البطولة لأصحاب أعلى متوسط تقييم (⭐) عبر كل مبارياتهم في هذه البطولة تحديدًا (بحد أدنى 3 تقييمات ليكون اللاعب مؤهلاً). عند التعادل، يشترك أكثر من لاعب في اللقب. المكافأة: <strong style="color:var(--gold)">+€400K</strong> قيمة سوقية و<strong style="color:var(--purple)">+150 XP</strong>. يظهر في البروفايل، اللوكر روم، الأخبار، وقناة التليجرام.
-        </div>
-      </div>
-
-      <div class="rule-card rc">
-        <div class="rule-icon">🚫</div>
-        <div class="rule-title">Suspended vs Banned — التعليق مقابل الطرد</div>
-        <div class="rule-txt">
-          <strong style="color:var(--text)">التعليق (Suspended)</strong>: حالة مؤقتة تحصل تلقائيًا عند تجاوز 3 كروت حمراء في نفس البطولة، ويقدر المدير يلغيها. <strong style="color:var(--red)">الطرد (Banned)</strong>: قرار إداري دائم من المدير، غير مرتبط بعدد الكروت.
+          Score a goal = <strong style="color:var(--text)">+10 XP</strong>. Win = <strong style="color:var(--text)">+30 XP</strong> (per player). Win Cup = <strong style="color:var(--gold)">+200 XP</strong>. MOTM = <strong style="color:var(--purple)">+30 XP</strong>.
         </div>
       </div>
 
@@ -222,7 +191,7 @@
         <div class="rule-icon">⏱️</div>
         <div class="rule-title">Match Format — نظام المباريات</div>
         <div class="rule-txt">
-          كل مباراة <strong style="color:var(--text)">10 دقائق</strong>. في الأدوار الإقصائية (Knockout)، التعادل مسموح في كل شوط لوحده. لو المواجهة بنظام <strong style="color:var(--text)">ذهاب وعودة</strong> وتعادل مجموع الأهداف بعد الشوطين، يحسم الفايز تلقائيًا بمحاكاة <strong style="color:var(--red)">ركلات ترجيح</strong> (بدون أهداف خارج الأرض أو مباراة ثالثة).
+          كل مباراة <strong style="color:var(--text)">10 دقائق</strong>. في الأدوار الإقصائية (Knockout)، ممنوع التعادل ويجب لعب <strong style="color:var(--red)">ركلات ترجيح</strong> في الحقيقة، ويتم إضافة هدف واحد للفائز على الموقع ليتأهل.
         </div>
       </div>
 
@@ -267,10 +236,12 @@
     <!-- UPDATED ADMIN CTRL with Qualify button -->
     <div id="admin-ctrl" style="display:none">
       <div class="admin-ctrl">
-        <button class="rec-btn" onclick="openRecord()">⚽ RECORD MATCH RESULT</button>
+        <button id="btn-record" class="rec-btn" onclick="openRecord()">⚽ RECORD MATCH RESULT</button>
+        <button id="btn-edit-last" class="rec-btn" style="display:none;background:linear-gradient(135deg,rgba(240,180,41,0.12),rgba(240,180,41,0.04));border-color:var(--gold);color:var(--gold)" onclick="editLastMatch()">✏️ EDIT LAST MATCH</button>
         <button id="btn-qualify" class="rec-btn" onclick="qualifyToKnockout()" style="display:none;background:linear-gradient(135deg,rgba(77,171,247,0.12),rgba(77,171,247,0.04));border-color:var(--blue);color:var(--blue);">⚡ QUALIFY TOP PLAYERS</button>
-        <button class="end-btn" onclick="confirmEnd()">🔴 END CUP & AWARD TROPHY</button>
-        <button class="btn btn-ghost" style="color:var(--red); border-color:rgba(255,71,87,0.3); margin-top:10px; width:100%" onclick="deleteTournament()">🗑️ DELETE TOURNAMENT (Moves to Recently Deleted)</button>
+        <button id="btn-end" class="end-btn" onclick="confirmEnd()">🔴 END CUP & AWARD TROPHY</button>
+        <button id="btn-archive-t" class="btn btn-gold" style="margin-top:10px;width:100%" onclick="toggleArchiveTournament()">📦 ARCHIVE TOURNAMENT</button>
+        <button class="btn btn-ghost" style="color:var(--red); border-color:rgba(255,71,87,0.3); margin-top:10px; width:100%" onclick="deleteTournament()">🗑️ DELETE TOURNAMENT (ADMIN ONLY)</button>
       </div>
     </div>
   </div>
@@ -285,26 +256,20 @@
     <div class="field"><label>Format</label>
       <div class="format-row" id="format-row">
         <div class="f-opt sel" data-val="league" onclick="setCreate('format',this)">🏅 League</div>
-        <div class="f-opt" data-val="groups" onclick="setCreate('format',this)">🧩 Groups</div>
         <div class="f-opt" data-val="tree" onclick="setCreate('format',this)">🌳 Elimination</div>
+        <div class="f-opt" data-val="groups" onclick="setCreate('format',this)">🧩 Groups</div>
       </div>
-    </div>
-    <div class="field" id="legs-field">
-      <label>Matches per Pairing (Legs)</label>
-      <div class="format-row" id="legs-row">
-        <div class="f-opt" data-val="1" onclick="setCreate('legs',this)">Single Leg</div>
-        <div class="f-opt sel" data-val="2" onclick="setCreate('legs',this)">Home &amp; Away</div>
-      </div>
+      <div id="format-hint" style="font-size:11px;color:var(--sub);margin-top:6px;line-height:1.5"></div>
     </div>
     <div class="field"><label>Type</label>
       <div class="format-row" id="type-row">
         <div class="f-opt sel" data-val="1v1" onclick="setCreate('type',this)">1v1 Singles</div>
         <div class="f-opt" data-val="2v2" onclick="setCreate('type',this)">2v2 Doubles</div>
       </div>
+      <div style="font-size:11px;color:var(--sub);margin-top:6px">1v1 = each player competes solo. 2v2 = pair a ⭐PRO with a 🌱YOUTH to form a team.</div>
     </div>
-    <div id="guest-assist-field" style="display:none"></div>
     <div id="create-players-section"></div>
-    <div id="groups-config-section"></div>
+    <div id="group-config-section"></div>
     <div id="create-err" class="err-msg" style="margin-top:0;margin-bottom:10px"></div>
     <button class="btn btn-gold" onclick="createTournament()">🏆 CREATE CUP</button>
   </div>

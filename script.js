@@ -1,31 +1,4 @@
 // ============================================================
-// GLOBAL SAFETY NET: لو أي خطأ غير متوقع أوقف الكود بالكامل، نعرض رسالة واضحة بدل شاشة فاضية تمامًا
-// ============================================================
-window.addEventListener('error', function(e){
-  if(window.__footbolaFatalHandled) return;
-  // إصلاح: الشاشة الكاملة تظهر فقط لو التطبيق لسه في مرحلة التحميل الأول ومحاولش يفتح خالص.
-  // أي خطأ يحصل بعد ما التطبيق دخل المستخدم فعليًا (screen-app/auth ظهرت) بس يتسجل بصمت من غير ما يقفل شغل المستخدم.
-  if(window.__footbolaAppEntered) { console.error('Runtime error (non-fatal, app already loaded):', e.error || e.message); return; }
-  window.__footbolaFatalHandled = true;
-  console.error('FATAL uncaught error during initial load:', e.error || e.message);
-  const showFallback = () => {
-    if(document.getElementById('footbola-fatal-error')) return;
-    const div = document.createElement('div');
-    div.id = 'footbola-fatal-error';
-    div.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:#0a0a1a;color:#fff;font-family:sans-serif;text-align:center;padding:24px';
-    div.innerHTML = `<div>
-      <div style="font-size:40px;margin-bottom:16px">⚠️</div>
-      <div style="font-size:18px;font-weight:700;margin-bottom:8px">Something went wrong while loading</div>
-      <div style="font-size:13px;opacity:0.6;margin-bottom:16px;max-width:320px">${(e.message||'Unknown error').toString().slice(0,150)}</div>
-      <button onclick="location.reload()" style="background:#f0b429;color:#000;border:none;padding:12px 24px;border-radius:8px;font-weight:700;cursor:pointer">🔄 Refresh Page</button>
-    </div>`;
-    document.body.appendChild(div);
-  };
-  if(document.body) showFallback();
-  else document.addEventListener('DOMContentLoaded', showFallback);
-});
-
-// ============================================================
 // CONFIG — Admin passwords updated to 1414 / 1414
 // ============================================================
 const ADMIN_C1 = '1414';
@@ -41,24 +14,7 @@ function getLevelTitle(lvl){if(lvl>=90)return'LEGEND';if(lvl>=70)return'ELITE';i
 // ============================================================
 const supabaseUrl = 'https://jvkjjpqlmofprmugkbxs.supabase.co';
 const supabaseKey = 'sb_publishable_Dhyyi9tDjzS6cjSeqAK-_g_xL1DctLB';
-let supabaseClient = null;
-try {
-  if(!window.supabase) throw new Error('Supabase library failed to load (CDN blocked or offline)');
-  supabaseClient = window.supabase.createClient(supabaseUrl, supabaseKey);
-} catch(e) {
-  console.error('FATAL: Supabase client failed to initialize', e);
-  // إصلاح "الشاشة الفاضية": بدل ما الكود يتوقف بصمت، نعرض رسالة خطأ واضحة تظهر فورًا للمستخدم
-  document.addEventListener('DOMContentLoaded', () => {
-    document.body.innerHTML = `<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0a0a1a;color:#fff;font-family:sans-serif;text-align:center;padding:24px">
-      <div>
-        <div style="font-size:40px;margin-bottom:16px">⚠️</div>
-        <div style="font-size:18px;font-weight:700;margin-bottom:8px">Connection Library Failed to Load</div>
-        <div style="font-size:14px;opacity:0.7;margin-bottom:16px">Check your internet connection or try disabling any ad-blocker/VPN, then refresh the page.</div>
-        <button onclick="location.reload()" style="background:#f0b429;color:#000;border:none;padding:12px 24px;border-radius:8px;font-weight:700;cursor:pointer">🔄 Refresh Page</button>
-      </div>
-    </div>`;
-  });
-}
+const supabaseClient = window.supabase.createClient(supabaseUrl, supabaseKey);
 
 let cloudDB = { players: [], pending: [], tournaments: [], news: [] };
 
@@ -80,7 +36,8 @@ async function saveDB(db) {
     const tournamentUpdates = db.tournaments.map(t => ({
         id: t.id, name: t.name, format: t.format, type: t.type, status: t.status,
         participants: t.participants, standings: t.standings, matches: t.matches,
-        phase: t.phase, schedule: t.schedule, bracket: t.bracket
+        phase: t.phase, schedule: t.schedule, bracket: t.bracket,
+        groups: t.groups, auto_qualify: t.autoQualify || false, archived_at: t.archivedAt || null
     }));
 
     try {
@@ -105,38 +62,27 @@ async function saveDB(db) {
         }
     } catch (error) {
         console.error("Cloud Sync Failed", error);
-        snackWithRetry('⚠️ Save failed — check your connection.', () => saveDB(db));
     }
 }
 
 // THE SURGICAL SAVES (No more bulldozers)
 async function saveSingleTournament(t) {
     if(!t) return;
-    try {
-        await supabaseClient.from('tournaments').upsert({
-            id: t.id, name: t.name, format: t.format, type: t.type, status: t.status,
-            participants: t.participants, standings: t.standings, matches: t.matches,
-            phase: t.phase, schedule: t.schedule, bracket: t.bracket, delta_log: t.deltaLog || [],
-            archived_at: t.archivedAt || null, guest_assist_enabled: t.guestAssistEnabled || false
-        });
-    } catch(error) {
-        console.error("Tournament Save Failed", error);
-        snackWithRetry('⚠️ Save failed — check your connection.', () => saveSingleTournament(t));
-    }
+    await supabaseClient.from('tournaments').upsert({
+        id: t.id, name: t.name, format: t.format, type: t.type, status: t.status,
+        participants: t.participants, standings: t.standings, matches: t.matches,
+        phase: t.phase, schedule: t.schedule, bracket: t.bracket,
+        groups: t.groups, auto_qualify: t.autoQualify || false, archived_at: t.archivedAt || null
+    });
 }
 
 async function saveSinglePlayer(p) {
     if(!p) return;
-    try {
-        await supabaseClient.from('players').upsert({
-            player_id: p.id, name: p.name, pin: p.pin, photo: p.photo,
-            tier: p.tier, stars: p.stars, stats: p.stats, market_value: p.marketValue,
-            status: p.status || 'active'
-        }, { onConflict: 'player_id' });
-    } catch(error) {
-        console.error("Player Save Failed", error);
-        snackWithRetry('⚠️ Save failed — check your connection.', () => saveSinglePlayer(p));
-    }
+    await supabaseClient.from('players').upsert({
+        player_id: p.id, name: p.name, pin: p.pin, photo: p.photo,
+        tier: p.tier, stars: p.stars, stats: p.stats, market_value: p.marketValue,
+        status: p.status || 'active'
+    }, { onConflict: 'player_id' });
 }
 
 // ============================================================
@@ -144,11 +90,10 @@ async function saveSinglePlayer(p) {
 // ============================================================
 let currentUser=null;
 let activeTournIdx=null;
-let cData={format:'league',type:'1v1',selected:[],teams:[],legs:2,groupCount:2,groupAssignment:{},groupQualifiers:[],guestAssistEnabled:false};
+let cData={format:'league',type:'1v1',selected:[],teams:[]};
 let pendingPro=null;
 let motmMatchIdx=null;
 let motmVotes={motm:null,ratings:{}};
-let isWalkoverMatch=false;
 
 // ============================================================
 // UTILS
@@ -192,17 +137,6 @@ function showTab(tab){
 function showErr(id,msg){const el=document.getElementById(id);if(el){el.textContent=msg;el.classList.add('show')}}
 function hideErr(id){document.getElementById(id)?.classList.remove('show')}
 function snack(msg){const el=document.getElementById('snack');el.textContent=msg;el.classList.add('show');clearTimeout(snack._t);snack._t=setTimeout(()=>el.classList.remove('show'),2800)}
-
-// بند 11: رسالة مع زرار "إعادة المحاولة" لأي عملية ممكن تعلّق أو تفشل
-window.__footbolaRetryFn = null;
-function snackWithRetry(msg, retryFn){
-  const el=document.getElementById('snack');
-  window.__footbolaRetryFn = retryFn;
-  el.innerHTML = `<span>${msg}</span> <button onclick="window.__footbolaRetryFn && window.__footbolaRetryFn()" style="margin-left:10px;background:var(--gold);color:#000;border:none;padding:6px 14px;border-radius:8px;font-weight:700;font-size:12px;cursor:pointer;font-family:'Rajdhani',sans-serif">🔄 Retry</button>`;
-  el.classList.add('show');
-  clearTimeout(snack._t);
-  snack._t=setTimeout(()=>el.classList.remove('show'),8000); // مهلة أطول عشان المستخدم يقدر يدوس Retry
-}
 function closeModal(id){document.getElementById(id)?.classList.remove('active')}
 function closeConf(){document.getElementById('conf-ov')?.classList.remove('active')}
 
@@ -223,22 +157,6 @@ async function addNews(text, icon='📰'){
       sendTelegramAlert(`${icon} ${text}`);
       
   } catch(e) { console.error("News sync error", e); }
-}
-
-// ============================================================
-// PHOTO STORAGE (Supabase Storage — بند 15: نقل الصور من Base64 لتخزين منفصل)
-// ============================================================
-async function uploadPhotoToStorage(base64Data, playerId){
-  if(!base64Data || !base64Data.startsWith('data:image')) return base64Data;
-  try {
-    const res = await fetch(base64Data);
-    const blob = await res.blob();
-    const fileName = `${playerId}_${Date.now()}.jpg`;
-    const { error } = await supabaseClient.storage.from('player-photos').upload(fileName, blob, { contentType: 'image/jpeg', upsert: true });
-    if(error) { console.error('Photo upload failed', error); return base64Data; } // fallback: يفضل يخزن base64 لو الرفع فشل
-    const { data } = supabaseClient.storage.from('player-photos').getPublicUrl(fileName);
-    return data?.publicUrl || base64Data;
-  } catch(e) { console.error('Photo upload error', e); return base64Data; }
 }
 
 function timeAgo(ts){
@@ -324,7 +242,7 @@ async function newAccount(){
   if(db.players.find(p=>p.id.toLowerCase()===username.toLowerCase())){showErr('new-error','This Username is already taken!');return}
   if(db.pending.find(p=>p.username?.toLowerCase()===username.toLowerCase())){showErr('new-error','This Username is waiting for approval.');return}
   
-  const reqData = { name:name, username:username, pin:pin, photo: photo ? await uploadPhotoToStorage(photo, username) : '', ts:Date.now() };
+  const reqData = { name:name, username:username, pin:pin, photo:photo||'', ts:Date.now() };
   
   try {
       btn.innerHTML = '⏳ جاري الإرسال...';
@@ -487,36 +405,19 @@ function renderTab(tab){
 // ============================================================
 // LIVE BREAKING NEWS RENDERER
 // ============================================================
-// بند 9: تصنيف الأخبار بأقسام (نتائج/ألقاب/إنذارات) لتسهيل التصفح
-let newsFilter = 'all';
-const NEWS_CATEGORIES = {
-  results: ['🏆','📰','⚡'],
-  titles: ['🥾','⭐','🏅'],
-  warnings: ['🚨','🚫'],
-};
-function setNewsFilter(cat){ newsFilter = cat; renderNewsFeed(); }
-
 function renderNewsFeed(){
   const db=getDB();
   const feed=document.getElementById('news-feed');if(!feed)return;
-  const filterRow=document.getElementById('news-filter-row');
-  const allItems=db.news||[];
-
-  if(filterRow){
-    const filters=[{key:'all',label:'📰 All'},{key:'results',label:'🏆 Results'},{key:'titles',label:'⭐ Titles'},{key:'warnings',label:'🚨 Warnings'}];
-    filterRow.innerHTML = filters.map(f=>`<div class="f-opt ${newsFilter===f.key?'sel':''}" style="flex:0 0 auto;padding:6px 12px;font-size:11px" onclick="setNewsFilter('${f.key}')">${f.label}</div>`).join('');
-  }
-
-  const items = newsFilter==='all' ? allItems : allItems.filter(n=>(NEWS_CATEGORIES[newsFilter]||[]).includes(n.icon));
-
+  const items=db.news||[];
+  
   if(items.length===0){
     feed.innerHTML='<div style="font-size:13px;color:var(--sub);padding:14px 0;text-align:center;background:var(--card);border-radius:12px">No news yet — play some matches!</div>';
     return;
   }
   
   feed.innerHTML=items.slice(0,10).map((n, i)=>{
-    const isLatest = (i === 0 && newsFilter==='all') ? 'latest' : '';
-    const timeDisplay = (i === 0 && newsFilter==='all') ? '🔴 LIVE NOW' : timeAgo(n.ts);
+    const isLatest = (i === 0) ? 'latest' : '';
+    const timeDisplay = (i === 0) ? '🔴 LIVE NOW' : timeAgo(n.ts);
     
     return `
     <div class="news-item ${isLatest}">
@@ -532,89 +433,30 @@ function renderNewsFeed(){
 // ============================================================
 // ARENA
 // ============================================================
-// بند 4-ب: ملخص/تقرير سريع يساعد الأدمن ياخد قرارات من غير ما يدور في كل شاشة لوحده
-function renderAdminAlerts(db, isAdmin){
-  const el = document.getElementById('admin-alerts-section');
-  if(!el) return;
-  if(!isAdmin){ el.style.display='none'; el.innerHTML=''; return; }
-
-  const pendingCount = (db.pending||[]).length;
-  const suspendedCount = db.players.filter(p=>p.status==='suspended').length;
-  const readyToQualify = db.tournaments.filter(t=>{
-    if(t.status!=='active' || t.phase!=='group' || !t.schedule || t.schedule.length===0) return false;
-    return t.schedule.every(m=>m.played);
-  });
-  const archivedNearExpiry = db.tournaments.filter(t=>t.status==='archived' && t.archivedAt && (Date.now()-t.archivedAt) > 36*3600000);
-
-  const alerts = [];
-  if(pendingCount>0) alerts.push({icon:'👋', text:`${pendingCount} new player request${pendingCount>1?'s':''} waiting for approval`, action:`showScreen('screen-app');showTab('locker')`, color:'var(--blue)'});
-  if(readyToQualify.length>0) alerts.push({icon:'⚡', text:`${readyToQualify.length} tournament${readyToQualify.length>1?'s are':' is'} ready to Qualify to Knockout`, action:`openTournament(${db.tournaments.indexOf(readyToQualify[0])})`, color:'var(--gold)'});
-  if(suspendedCount>0) alerts.push({icon:'🚫', text:`${suspendedCount} player${suspendedCount>1?'s':''} currently suspended`, action:`showScreen('screen-app');showTab('locker')`, color:'var(--red)'});
-  if(archivedNearExpiry.length>0) alerts.push({icon:'⏳', text:`${archivedNearExpiry.length} deleted tournament${archivedNearExpiry.length>1?'s':''} will be permanently erased soon`, action:null, color:'var(--sub)'});
-
-  if(alerts.length===0){ el.style.display='none'; el.innerHTML=''; return; }
-
-  el.style.display='block';
-  el.innerHTML = `<div style="margin-bottom:14px">
-    <div class="pot-lbl">📋 Admin Alerts</div>
-    ${alerts.map(a=>`<div ${a.action?`onclick="${a.action}"`:''} style="display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--border);border-left:3px solid ${a.color};border-radius:10px;padding:12px 14px;margin-bottom:8px;${a.action?'cursor:pointer':''}">
-      <span style="font-size:18px">${a.icon}</span>
-      <span style="flex:1;font-size:13px;font-weight:600">${a.text}</span>
-      ${a.action?'<span style="color:var(--sub);font-size:16px">›</span>':''}
-    </div>`).join('')}
-  </div>`;
-}
-
 function renderArena(){
   const db=getDB();
   const isAdmin=currentUser?.type==='admin';
   const createBtn=document.getElementById('create-btn');
   if(createBtn)createBtn.style.display=isAdmin?'flex':'none';
   renderNewsFeed();
-  renderAdminAlerts(db, isAdmin); // بند 4-ب: تقارير/ملخصات سريعة تساعد الأدمن ياخد قرارات
   const list=document.getElementById('tournament-list');
-  const visibleTournaments = db.tournaments.filter(t => t.status!=='archived');
-  const archivedTournaments = db.tournaments.filter(t => t.status==='archived');
-
-  if(visibleTournaments.length===0){
+  const items=db.tournaments.map((t,i)=>({t,i})).filter(x=>isAdmin||!x.t.archivedAt);
+  if(items.length===0){
     list.innerHTML=`<div class="empty-state"><div class="empty-ico">🏟️</div><div class="empty-txt">No tournaments yet.<br>${isAdmin?'Tap CREATE to start!':'Ask the Manager.'}</div></div>`;
-  } else {
-    list.innerHTML=visibleTournaments.map((t)=>{
-      const i=db.tournaments.indexOf(t);
-      const badge=t.status==='ended'
-        ?`<span class="ended-badge">ENDED</span>`
-        :`<div class="live-badge"><div class="live-dot"></div>LIVE</div>`;
-      return `<div class="t-card" onclick="openTournament(${i})">
-        <div class="t-card-top">${badge}<div class="av-stack">${buildAvatarStack(t,db)}</div></div>
-        <div class="t-name">${t.name}</div>
-        <div class="t-meta">${t.type.toUpperCase()} · ${t.format==='league'?'🏅 League':(t.format==='groups'?'🧩 Group Stage':'🌳 Elimination')} · ${t.participants.length} ${t.type==='2v2'?'teams':'players'}</div>
-      </div>`;
-    }).join('');
+    return;
   }
-
-  // بند 28: قسم "سلة المحذوفات" — يظهر للأدمن فقط، البطولات المؤرشفة قابلة للاستعادة الكاملة خلال 48 ساعة
-  const trashSection = document.getElementById('recently-deleted-section');
-  if(trashSection){
-    if(isAdmin && archivedTournaments.length>0){
-      trashSection.style.display='block';
-      trashSection.innerHTML = `
-        <div class="divider"></div>
-        <div class="pot-lbl">🗑️ Recently Deleted (auto-erased after 48h)</div>
-        ${archivedTournaments.map(t=>{
-          const i=db.tournaments.indexOf(t);
-          const hoursLeft = t.archivedAt ? Math.max(0, 48 - Math.floor((Date.now()-t.archivedAt)/3600000)) : 48;
-          return `<div class="t-card" style="opacity:0.7">
-            <div class="t-name">${t.name}</div>
-            <div class="t-meta">${t.type.toUpperCase()} · ${hoursLeft}h left before permanent deletion</div>
-            <button class="btn btn-blue" style="margin-top:8px;width:100%" onclick="restoreArchivedTournament(${i})">♻️ RESTORE</button>
-          </div>`;
-        }).join('')}
-      `;
-    } else {
-      trashSection.style.display='none';
-      trashSection.innerHTML='';
-    }
-  }
+  list.innerHTML=items.map(({t,i})=>{
+    const badge=t.archivedAt
+      ?`<span class="ended-badge">📦 ARCHIVED</span>`
+      :t.status==='ended'
+      ?`<span class="ended-badge">ENDED</span>`
+      :`<div class="live-badge"><div class="live-dot"></div>LIVE</div>`;
+    return `<div class="t-card" onclick="openTournament(${i})">
+      <div class="t-card-top">${badge}<div class="av-stack">${buildAvatarStack(t,db)}</div></div>
+      <div class="t-name">${t.name}</div>
+      <div class="t-meta">${t.type.toUpperCase()} · ${t.format==='league'?'🏅 League':'🌳 Elimination'} · ${t.participants.length} ${t.type==='2v2'?'teams':'players'}</div>
+    </div>`;
+  }).join('');
 }
 
 function buildAvatarStack(t,db){
@@ -631,67 +473,133 @@ function buildAvatarStack(t,db){
 // CREATE TOURNAMENT
 // ============================================================
 function openCreate(){
-  cData={format:'league',type:'1v1',selected:[],teams:[],legs:2,groupCount:2,groupAssignment:{},groupQualifiers:[],guestAssistEnabled:false};pendingPro=null;
+  cData={format:'league',type:'1v1',selected:[],teams:[],groupCount:2,groupAssign:null,groupQualifiers:[],legs:2,autoQualify:false};pendingPro=null;
   document.getElementById('cup-name').value='';
   document.querySelectorAll('#format-row .f-opt').forEach(el=>el.classList.toggle('sel',el.dataset.val==='league'));
   document.querySelectorAll('#type-row .f-opt').forEach(el=>el.classList.toggle('sel',el.dataset.val==='1v1'));
-  document.querySelectorAll('#legs-row .f-opt').forEach(el=>el.classList.toggle('sel',el.dataset.val==='2'));
-  // إصلاح: التأكد من ظهور حقل الأشواط دايمًا عند فتح جديد (الفورمات الافتراضي هنا "league" مش "tree")
-  const legsField = document.getElementById('legs-field');
-  if(legsField) legsField.style.display='block';
   hideErr('create-err');
   renderCreatePlayers();
-  document.getElementById('groups-config-section').innerHTML='';
-  renderGuestAssistToggle();
+  renderGroupConfig();
   document.getElementById('modal-create').classList.add('active');
 }
-function renderGuestAssistToggle(){
-  const el = document.getElementById('guest-assist-field');
-  if(!el) return;
-  // بند 12: الميزة متاحة فقط للدوري الفردي (League + 1v1)
-  if(cData.format==='league' && cData.type==='1v1'){
-    el.style.display='block';
-    el.innerHTML = `<div class="field">
-      <label style="display:flex;align-items:center;gap:8px;cursor:pointer" onclick="toggleGuestAssist()">
-        <input type="checkbox" ${cData.guestAssistEnabled?'checked':''} style="width:18px;height:18px" readonly>
-        <span>🎯 Enable Guest Player Assist (Top 2 only)</span>
-      </label>
-    </div>`;
-  } else {
-    el.style.display='none'; el.innerHTML='';
-    cData.guestAssistEnabled=false;
-  }
-}
-function toggleGuestAssist(){
-  cData.guestAssistEnabled = !cData.guestAssistEnabled;
-  renderGuestAssistToggle();
-}
-
 function setCreate(prop,el){
   el.parentElement.querySelectorAll('.f-opt').forEach(x=>x.classList.remove('sel'));
-  el.classList.add('sel');
-  cData[prop]= (prop==='legs') ? parseInt(el.dataset.val) : el.dataset.val;
-  if(prop==='format' || prop==='type'){
-    cData.selected=[];cData.teams=[];pendingPro=null;
-    cData.groupAssignment={};cData.groupQualifiers=[];
-  }
-  // البطولة الإقصائية المباشرة (Elimination بدون دور مجموعات/دوري قبلها) تفضل مباراة واحدة حاسمة زي الأصل دايمًا.
-  // إخفاء الحقل بصريًا بس من غير لمس cData.legs، عشان التنقل بين الفورمات ميعملش تضارب بين القيمة الفعلية والشكل الظاهر
-  const legsField = document.getElementById('legs-field');
-  if(legsField){
-    legsField.style.display = (cData.format==='tree') ? 'none' : 'block';
-  }
+  el.classList.add('sel');cData[prop]=el.dataset.val;
+  cData.selected=[];cData.teams=[];pendingPro=null;
+  cData.groupAssign=null;cData.groupQualifiers=[];
   renderCreatePlayers();
-  renderGroupsConfig();
-  renderGuestAssistToggle();
+  renderGroupConfig();
+}
+
+// ============================================================
+// GROUP STAGE CONFIGURATION (Create Modal)
+// ============================================================
+function participantCountForCreate(){
+  return cData.type==='1v1'?cData.selected.length:cData.teams.length;
+}
+function renderGroupConfig(){
+  const hint=document.getElementById('format-hint');
+  const sec=document.getElementById('group-config-section');
+  if(cData.format!=='groups'){
+    sec.innerHTML='';
+    hint.textContent=cData.format==='tree'?'🌳 Direct knockout bracket.':cData.format==='league'?'🏅 Everyone plays everyone (single flat table).':'';
+    return;
+  }
+  hint.textContent='🧩 Split players into separate groups. Top players from each group advance to the knockout tree.';
+  const total=participantCountForCreate();
+  let html=`<div class="field"><label>Number of Groups</label>
+    <input type="number" id="group-count-input" class="select-field" min="2" max="8" value="${cData.groupCount}" onchange="setGroupCount(this.value)">
+    <div style="font-size:11px;color:var(--sub);margin-top:4px">Players are split evenly across this many groups. Each group plays its own mini-league.</div>
+    </div>
+    <div class="field"><label>Matches per Pairing</label>
+      <div class="format-row">
+        <div class="f-opt ${cData.legs===1?'sel':''}" onclick="setLegs(1,this)">Single Match</div>
+        <div class="f-opt ${cData.legs===2?'sel':''}" onclick="setLegs(2,this)">Home &amp; Away (x2)</div>
+      </div>
+      <div style="font-size:11px;color:var(--sub);margin-top:4px">Home &amp; Away means every pair inside a group plays each other twice.</div>
+    </div>
+    <button class="btn btn-ghost" style="margin-bottom:10px" onclick="autoDistributeGroups()">🔀 Distribute Players Randomly</button>
+    <div style="font-size:11px;color:var(--sub);margin:-4px 0 10px">Tap any player chip afterwards to move them into the next group.</div>
+    <div id="group-boxes"></div>
+    <label style="font-size:12px;display:flex;align-items:center;gap:6px;margin:10px 0;color:var(--sub)">
+      <input type="checkbox" id="auto-qualify-chk" ${cData.autoQualify?'checked':''} onchange="cData.autoQualify=this.checked">
+      Auto-generate the knockout tree once all group matches are played
+    </label>`;
+  if(total<4){
+    html=`<div style="font-size:12px;color:var(--sub);padding:6px 0">Select at least 4 players/teams above to configure groups.</div>`+html;
+  }
+  sec.innerHTML=html;
+  if(cData.groupAssign)renderGroupBoxes();
+}
+function setLegs(n,el){
+  cData.legs=n;
+  el.parentElement.querySelectorAll('.f-opt').forEach(x=>x.classList.remove('sel'));
+  el.classList.add('sel');
+}
+function setGroupCount(val){
+  const n=parseInt(val)||2;
+  cData.groupCount=Math.max(2,Math.min(8,n));
+  cData.groupAssign=null;cData.groupQualifiers=[];
+  document.getElementById('group-boxes').innerHTML='';
+}
+function autoDistributeGroups(){
+  const total=participantCountForCreate();
+  if(total<4){snack('⚠️ Select at least 4 players/teams first!');return}
+  if(cData.groupCount>=total){snack('⚠️ Too many groups for this number of players!');return}
+  const indices=[...Array(total).keys()].sort(()=>Math.random()-0.5);
+  const groups=Array.from({length:cData.groupCount},()=>[]);
+  indices.forEach((idx,i)=>groups[i%cData.groupCount].push(idx));
+  if(groups.some(g=>g.length<2)){snack('⚠️ Too many groups — some would have fewer than 2 players. Reduce group count.');return}
+  cData.groupAssign=groups;
+  cData.groupQualifiers=groups.map(g=>Math.min(2,g.length-1));
+  renderGroupBoxes();
+}
+function participantLabel(idx){
+  if(cData.type==='1v1'){
+    const db=getDB();const p=db.players.find(x=>x.id===cData.selected[idx]);
+    return p?p.name:cData.selected[idx];
+  }
+  return cData.teams[idx]?cData.teams[idx].name:'';
+}
+function renderGroupBoxes(){
+  const box=document.getElementById('group-boxes');if(!box)return;
+  let html='';
+  cData.groupAssign.forEach((group,gi)=>{
+    const letter=String.fromCharCode(65+gi);
+    html+=`<div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span style="font-weight:800;color:var(--gold)">Group ${letter} (${group.length})</span>
+        <span style="font-size:11px;color:var(--sub);display:flex;align-items:center;gap:6px">Qualify
+          <input type="number" min="1" max="${group.length-1}" value="${cData.groupQualifiers[gi]}" style="width:44px;background:var(--card2);border:1px solid var(--border);color:white;border-radius:4px;text-align:center;padding:2px" onchange="setGroupQualifiers(${gi},this.value)">
+        </span>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
+        ${group.map(idx=>`<div class="p-chip" onclick="moveParticipant(${gi},${idx})" title="Tap to move to next group">${participantLabel(idx)}</div>`).join('')}
+      </div>
+    </div>`;
+  });
+  box.innerHTML=html;
+}
+function setGroupQualifiers(gi,val){
+  const g=cData.groupAssign[gi];
+  let n=parseInt(val)||1;
+  n=Math.max(1,Math.min(g.length-1,n));
+  cData.groupQualifiers[gi]=n;
+}
+function moveParticipant(fromGi,idx){
+  const groups=cData.groupAssign;
+  const toGi=(fromGi+1)%groups.length;
+  groups[fromGi]=groups[fromGi].filter(i=>i!==idx);
+  groups[toGi].push(idx);
+  cData.groupQualifiers=groups.map((g,gi)=>Math.min(cData.groupQualifiers[gi]||2,Math.max(1,g.length-1)));
+  renderGroupBoxes();
 }
 function renderCreatePlayers(){
   const db=getDB();const sec=document.getElementById('create-players-section');
-  const eligiblePlayers=db.players.filter(p=>p.status!=='banned'&&p.status!=='suspended');
   if(cData.type==='1v1'){
-    if(eligiblePlayers.length===0){sec.innerHTML=`<div class="field"><label>Select Players</label><div style="font-size:13px;color:var(--sub);padding:6px 0">No approved players yet.</div></div>`;return}
+    if(db.players.length===0){sec.innerHTML=`<div class="field"><label>Select Players</label><div style="font-size:13px;color:var(--sub);padding:6px 0">No approved players yet.</div></div>`;return}
     sec.innerHTML=`<div class="field"><label>Select Players (min 2)</label><div class="p-sel-list">
-      ${eligiblePlayers.map(p=>{
+      ${db.players.map(p=>{
         const sel=cData.selected.includes(p.id);
         return`<div class="p-sel-item ${sel?'sel':''}" onclick="toggleSel('${p.id}')">
           <div class="pav" style="width:32px;height:32px;font-size:11px">${p.photo?`<img src="${p.photo}">`:`${initials(p.name)}`}</div>
@@ -701,8 +609,8 @@ function renderCreatePlayers(){
       }).join('')}
     </div></div>`;
   } else {
-    const pros=eligiblePlayers.filter(p=>p.tier==='pro');
-    const youths=eligiblePlayers.filter(p=>p.tier!=='pro');
+    const pros=db.players.filter(p=>p.tier==='pro');
+    const youths=db.players.filter(p=>p.tier!=='pro');
     const usedIds=cData.teams.flatMap(t=>[t.proId,t.youthId]);
     sec.innerHTML=`
       <div class="divider"></div>
@@ -718,113 +626,16 @@ function renderCreatePlayers(){
       </div>`;
     if(pendingPro){const el=document.querySelector(`.p-chip[data-id="${pendingPro.id}"]`);if(el)el.classList.add('sp')}
   }
-  renderGroupsConfig();
 }
-// ============================================================
-// GROUP STAGE CONFIGURATION (القسم 2-أ + القسم 4: دور المجموعات)
-// ============================================================
-const GROUP_COLORS=['#06d77b','#ff4757','#f0b429','#7c5cff','#4dabf7','#ff8c42','#ff6b9d','#20c997'];
-function groupLabel(i){ return String.fromCharCode(65+i); }
-
-function getGroupParticipants(){
-  const db=getDB();
-  if(cData.type==='1v1'){
-    return cData.selected.map(id=>{ const p=db.players.find(x=>x.id===id); return {id, name:p?p.name:id}; });
-  }
-  return cData.teams.map(t=>({id:t.name, name:t.name}));
-}
-
-function setGroupCount(delta){
-  cData.groupCount = Math.max(2, Math.min(8, (cData.groupCount||2)+delta));
-  const q = cData.groupQualifiers || [];
-  cData.groupQualifiers = Array.from({length:cData.groupCount}, (_,i)=> q[i] || 2);
-  // أي لاعب متحط في مجموعة رقمها بقى أكبر من العدد الجديد يترجع "غير معيّن"
-  Object.keys(cData.groupAssignment).forEach(pid=>{ if(cData.groupAssignment[pid] >= cData.groupCount) delete cData.groupAssignment[pid]; });
-  renderGroupsConfig();
-}
-
-function randomizeGroups(){
-  const participants = getGroupParticipants();
-  const shuffled = [...participants].sort(()=>Math.random()-0.5);
-  cData.groupAssignment = {};
-  // بند: عادي تكون بعض المجموعات فيها لاعب زيادة عن التانية (توزيع بالباقي)
-  shuffled.forEach((p,i)=>{ cData.groupAssignment[p.id] = i % cData.groupCount; });
-  renderGroupsConfig();
-}
-
-function cycleGroup(pid){
-  const cur = cData.groupAssignment[pid];
-  cData.groupAssignment[pid] = (cur===undefined) ? 0 : (cur+1)%cData.groupCount;
-  renderGroupsConfig();
-}
-
-function updateQualifiersTotal(){
-  const total = (cData.groupQualifiers||[]).slice(0,cData.groupCount).reduce((a,b)=>a+(parseInt(b)||0),0);
-  const el = document.getElementById('qualifiers-total-msg');
-  if(!el) return;
-  const isPow2 = total>0 && (total & (total-1))===0;
-  el.textContent = `Total Qualifiers to Knockout: ${total} ${isPow2?'✅ Valid (power of 2)':'⚠️ Must be a power of 2 (2, 4, 8, 16...)'}`;
-  el.style.color = isPow2 ? 'var(--green)' : 'var(--red)';
-}
-
-function renderGroupsConfig(){
-  const container = document.getElementById('groups-config-section');
-  if(!container) return;
-  if(cData.format !== 'groups'){ container.innerHTML=''; return; }
-  const participants = getGroupParticipants();
-  if(participants.length < 4){
-    container.innerHTML = `<div class="field"><div style="font-size:12px;color:var(--sub)">Select at least 4 players/teams above to configure groups.</div></div>`;
-    return;
-  }
-  if(!cData.groupQualifiers || cData.groupQualifiers.length !== cData.groupCount){
-    const q = cData.groupQualifiers || [];
-    cData.groupQualifiers = Array.from({length:cData.groupCount}, (_,i)=> q[i] || 2);
-  }
-  container.innerHTML = `
-    <div class="divider"></div>
-    <div class="field">
-      <label>Number of Groups</label>
-      <div class="format-row">
-        <div class="f-opt" onclick="setGroupCount(-1)">➖</div>
-        <div class="f-opt sel" style="flex:0 0 50px">${cData.groupCount}</div>
-        <div class="f-opt" onclick="setGroupCount(1)">➕</div>
-      </div>
-    </div>
-    <button class="btn btn-blue" onclick="randomizeGroups()" style="margin-bottom:10px">🎲 Randomize Groups</button>
-    <div class="pot-lbl">Tap a player/team to assign or cycle their group</div>
-    <div class="pot-chips">
-      ${participants.map(p=>{
-        const g = cData.groupAssignment[p.id];
-        const label = g!==undefined ? groupLabel(g) : '?';
-        const color = g!==undefined ? GROUP_COLORS[g % GROUP_COLORS.length] : 'var(--sub)';
-        return `<div class="p-chip" style="border:2px solid ${color};color:${color}" onclick="cycleGroup('${p.id}')">${p.name} [${label}]</div>`;
-      }).join('')}
-    </div>
-    <div class="divider"></div>
-    <div class="pot-lbl">Qualifiers per Group (to Knockout Stage)</div>
-    ${Array.from({length:cData.groupCount}).map((_,i)=>{
-      const members = participants.filter(p=>cData.groupAssignment[p.id]===i);
-      // إصلاح: لو عدد المتأهلين المخزّن أكبر من عدد الأعضاء الفعلي الحالي (بعد نقل لاعب لمجموعة تانية)، يتظبط تلقائيًا
-      if((cData.groupQualifiers[i]||0) > members.length) cData.groupQualifiers[i] = Math.max(1, members.length);
-      return `<div class="field" style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
-        <label style="flex:1;margin:0;font-size:13px;color:${GROUP_COLORS[i%GROUP_COLORS.length]}">Group ${groupLabel(i)} (${members.length} members)</label>
-        <input type="number" class="score-in" style="width:60px;font-size:20px;padding:6px" min="1" max="${Math.max(members.length,1)}" value="${cData.groupQualifiers[i]||2}" oninput="cData.groupQualifiers[${i}]=parseInt(this.value)||1;updateQualifiersTotal()">
-      </div>`;
-    }).join('')}
-    <div id="qualifiers-total-msg" style="font-size:12px;margin-top:4px;font-weight:600"></div>
-  `;
-  updateQualifiersTotal();
-}
-
 function toggleSel(pid){
   const idx=cData.selected.indexOf(pid);
   if(idx===-1)cData.selected.push(pid);else cData.selected.splice(idx,1);
+  cData.groupAssign=null;cData.groupQualifiers=[];
   renderCreatePlayers();
+  renderGroupConfig();
 }
 function selectPotPlayer(el){
   const id=el.dataset.id;const tier=el.dataset.tier;
-  const usedIds=cData.teams.flatMap(t=>[t.proId,t.youthId]);
-  if(usedIds.includes(id)){snack('⚠️ This player is already in a team!');return}
   const db=getDB();const player=db.players.find(p=>p.id===id);if(!player)return;
   if(tier==='pro'){
     pendingPro={id,name:player.name};
@@ -833,10 +644,11 @@ function selectPotPlayer(el){
   } else {
     if(!pendingPro){snack('Pick a PRO player first!');return}
     cData.teams.push({name:pendingPro.name+' & '+player.name,proId:pendingPro.id,proName:pendingPro.name,youthId:id,youthName:player.name});
-    pendingPro=null;renderCreatePlayers();
+    pendingPro=null;cData.groupAssign=null;cData.groupQualifiers=[];
+    renderCreatePlayers();renderGroupConfig();
   }
 }
-function removeTeam(i){cData.teams.splice(i,1);renderCreatePlayers()}
+function removeTeam(i){cData.teams.splice(i,1);cData.groupAssign=null;cData.groupQualifiers=[];renderCreatePlayers();renderGroupConfig()}
 
 // ============================================================
 // CREATE TOURNAMENT — WITH BUTTON LOCK
@@ -854,67 +666,47 @@ async function createTournament(){
     participants=cData.teams;
   }
 
-  // بند 9 و16: تحقق دور المجموعات (كل المشاركين معيّنين + مجموع المتأهلين قوة 2) — قبل قفل الزر
-  if(cData.format==='groups'){
-    const allAssigned = participants.every(p => {
-      const pid = cData.type==='1v1' ? p : p.name;
-      return cData.groupAssignment[pid] !== undefined;
-    });
-    if(!allAssigned){ showErr('create-err','Assign every player/team to a group first!'); return; }
-    // تحقق دفاعي: عدد متأهلي أي مجموعة مينفعش يتجاوز عدد أعضائها الفعلي
-    for(let gi=0; gi<cData.groupCount; gi++){
-      const memberCount = participants.filter(p => {
-        const pid = cData.type==='1v1' ? p : p.name;
-        return cData.groupAssignment[pid] === gi;
-      }).length;
-      if((parseInt(cData.groupQualifiers[gi])||0) > memberCount){
-        showErr('create-err', `Group ${groupLabel(gi)} has more qualifiers set than actual members!`);
-        return;
-      }
-    }
-    const totalQualifiers = cData.groupQualifiers.slice(0,cData.groupCount).reduce((a,b)=>a+(parseInt(b)||0),0);
-    const isPow2 = totalQualifiers>0 && (totalQualifiers & (totalQualifiers-1))===0;
-    if(!isPow2){ showErr('create-err',`Total qualifiers across all groups (${totalQualifiers}) must be a power of 2 (2, 4, 8, 16)!`); return; }
-  }
-
   // 🛑 قفل الزر لمنع الضغط المزدوج
   const btn = document.querySelector('#modal-create .btn-gold');
   if(btn) { btn.innerHTML = '⏳ CREATING...'; btn.style.pointerEvents = 'none'; }
+  function resetCreateBtn(){ if(btn){ btn.innerHTML='🏆 CREATE CUP'; btn.style.pointerEvents='auto'; } }
 
   const db=getDB();
   const standings=participants.map(p=>{
     if(cData.type==='1v1'){
       const pl=db.players.find(x=>x.id===p);
-      return{id:p,name:pl?.name||p,PL:0,W:0,D:0,L:0,GF:0,GA:0,GD:0,PTS:0,yellowCount:0,redCount:0};
+      return{id:p,name:pl?.name||p,PL:0,W:0,D:0,L:0,GF:0,GA:0,GD:0,PTS:0};
     } else {
-      return{id:p.name,name:p.name,proId:p.proId,youthId:p.youthId,PL:0,W:0,D:0,L:0,GF:0,GA:0,GD:0,PTS:0,yellowCount:0,redCount:0};
+      return{id:p.proId+'::'+p.youthId,name:p.name,proId:p.proId,youthId:p.youthId,PL:0,W:0,D:0,L:0,GF:0,GA:0,GD:0,PTS:0};
     }
   });
 
-  let t={id:Date.now()*1000+Math.floor(Math.random()*1000),name,format:cData.format,type:cData.type,participants,standings,matches:[],status:'active',deltaLog:[],legs:(cData.format==='tree'?1:cData.legs),guestAssistEnabled:(cData.format==='league'&&cData.type==='1v1'&&cData.guestAssistEnabled)};
+  let t={id:Date.now(),name,format:cData.format,type:cData.type,participants,standings,matches:[],status:'active'};
   const n=participants.length;
 
-  // بند 16: فورمات "مجموعات" مستثنى تمامًا من قفل قوة-2 على إجمالي المشاركين
   if(cData.format==='groups'){
-    t.groups = [];
-    t.legs = cData.legs;
-    let combinedSchedule = [];
-    for(let gi=0; gi<cData.groupCount; gi++){
-      const groupStandings = standings.filter(s => cData.groupAssignment[s.id] === gi);
-      groupStandings.forEach(s => s.groupIndex = gi);
-      const groupSchedule = generateRoundRobin(groupStandings, cData.type, cData.legs).map(m => ({...m, groupIndex: gi}));
-      combinedSchedule = combinedSchedule.concat(groupSchedule);
-      t.groups.push({ index: gi, name: `Group ${groupLabel(gi)}`, color: GROUP_COLORS[gi%GROUP_COLORS.length], ids: groupStandings.map(s=>s.id), qualifiers: parseInt(cData.groupQualifiers[gi])||2 });
-    }
-    t.phase='group'; t.schedule = combinedSchedule;
+    if(!cData.groupAssign){showErr('create-err','Distribute the players into groups first!');resetCreateBtn();return}
+    if(cData.groupAssign.some(g=>g.length<2)){showErr('create-err','Every group needs at least 2 players!');resetCreateBtn();return}
+    const groups=cData.groupAssign.map((idxArr,gi)=>{
+      const ids=idxArr.map(i=>standings[i].id);
+      idxArr.forEach(i=>{standings[i].group=gi;});
+      const size=idxArr.length;
+      let qual=cData.groupQualifiers[gi]||2;
+      qual=Math.max(1,Math.min(size-1,qual));
+      return{name:`Group ${String.fromCharCode(65+gi)}`,ids,qualifiers:qual};
+    });
+    t.groups=groups;
+    t.phase='groups';
+    t.schedule=generateGroupSchedules(groups,cData.legs);
+    t.autoQualify=!!cData.autoQualify;
   } else if(![2,4,8,16].includes(n)){
-    t.format='league'; t.phase='group'; t.legs=cData.legs; t.schedule=generateRoundRobin(standings,cData.type,cData.legs);
-    snack('⚠️ Participant count must be 2, 4, 8, or 16 for this format. Forced League format.');
+    t.format='league'; t.phase='group'; t.schedule=generateRoundRobin(standings,cData.type);
+    snack('⚠️ Odd number! Forced League format (Double Leg).');
   } else {
     if(cData.format==='tree'){
       t.phase='elimination'; t.bracket=generateBracket(standings.map(s=>s.id),cData.type);
     } else {
-      t.phase='group'; t.legs=cData.legs; t.schedule=generateRoundRobin(standings,cData.type,cData.legs);
+      t.phase='group'; t.schedule=generateRoundRobin(standings,cData.type);
     }
   }
 
@@ -929,22 +721,38 @@ async function createTournament(){
   closeModal('modal-create');snack('🏆 "'+name+'" created!');renderArena();
 }
 
-// Generate round-robin matchups with configurable legs (بند 11: عدد الأشواط قابل للاختيار)
-function generateRoundRobin(standings,type,legs=2){
+// Generate all round-robin matchups (each pair plays twice)
+function generateRoundRobin(standings,type){
   const ids=standings.map(s=>s.id);
   const schedule=[];
   for(let i=0;i<ids.length;i++){
     for(let j=i+1;j<ids.length;j++){
       schedule.push({aId:ids[i],bId:ids[j],leg:1,played:false});
-      if(legs===2) schedule.push({aId:ids[j],bId:ids[i],leg:2,played:false});
+      schedule.push({aId:ids[j],bId:ids[i],leg:2,played:false});
     }
   }
   return schedule;
 }
 
+// Generate round-robin schedules for each group separately, tagged with group index
+function generateGroupSchedules(groups,legs){
+  legs=legs===1?1:2;
+  const schedule=[];
+  groups.forEach((g,gi)=>{
+    const ids=g.ids;
+    for(let i=0;i<ids.length;i++){
+      for(let j=i+1;j<ids.length;j++){
+        schedule.push({aId:ids[i],bId:ids[j],leg:1,played:false,group:gi});
+        if(legs===2)schedule.push({aId:ids[j],bId:ids[i],leg:2,played:false,group:gi});
+      }
+    }
+  });
+  return schedule;
+}
+
 // Generate elimination bracket
-function generateBracket(playerIds,type,preOrdered=false){
-  const shuffled=preOrdered ? [...playerIds] : [...playerIds].sort(()=>Math.random()-0.5);
+function generateBracket(playerIds,type){
+  const shuffled=[...playerIds].sort(()=>Math.random()-0.5);
   const size=Math.pow(2,Math.ceil(Math.log2(shuffled.length)));
   while(shuffled.length<size)shuffled.push(null);
   const rounds=[];
@@ -964,73 +772,39 @@ function generateBracket(playerIds,type,preOrdered=false){
   return rounds;
 }
 
-// بند 21 و22: توليد شجرة من متأهلي المجموعات مع تجنب تكرار نفس المجموعة في أول دور، وسيدنج بسيط
-function generateGroupBracket(qualifiersByGroup, type){
-  let pool = [];
-  qualifiersByGroup.forEach((ids, gIdx) => {
-    ids.forEach((id, rank) => { if(id) pool.push({id, gIdx, rank}); });
-  });
-  // ترتيب حسب الرتبة (كل أوائل المجموعات الأول، بعدين التانية...) مع شفل بسيط جوه نفس الرتبة للعدالة
-  pool.sort((a,b)=> a.rank - b.rank || Math.random()-0.5);
-
-  const used = new Array(pool.length).fill(false);
-  const orderedFinal = [];
-  for(let i=0;i<pool.length;i++){
-    if(used[i]) continue;
-    used[i]=true;
-    orderedFinal.push(pool[i].id);
-    // بند 22: أفضل شريك = مجموعة مختلفة + رتبة مختلفة (زي أول المجموعة ضد تاني مجموعة تانية)
-    // ده بيمنع "أول ضد أول" في أول دور، وهي مشكلة سيدنج معروفة بتضيّع أفضل لاعبين بدري
-    let partnerIdx = -1;
-    for(let j=i+1;j<pool.length;j++){
-      if(!used[j] && pool[j].gIdx !== pool[i].gIdx && pool[j].rank !== pool[i].rank){ partnerIdx=j; break; }
-    }
-    // مفيش شريك بمجموعة ورتبة مختلفة → نكتفي بتجنب نفس المجموعة بس
-    if(partnerIdx === -1){
-      for(let j=i+1;j<pool.length;j++){
-        if(!used[j] && pool[j].gIdx !== pool[i].gIdx){ partnerIdx=j; break; }
-      }
-    }
-    // آخر حل: نفس المجموعة (لو رياضيًا مفيش بديل تاني)
-    if(partnerIdx === -1){
-      for(let j=i+1;j<pool.length;j++){ if(!used[j]){ partnerIdx=j; break; } }
-    }
-    if(partnerIdx !== -1){ used[partnerIdx]=true; orderedFinal.push(pool[partnerIdx].id); }
-  }
-  return generateBracket(orderedFinal, type, true);
-}
-
 // ============================================================
 // TOURNAMENT SCREEN — Updated to show Qualify button
 // ============================================================
-async function openTournament(idx){
-  activeTournIdx=idx;
-  const t = getDB().tournaments[idx];
-  if(t && !t.loaded){
-      snack('🔄 Loading tournament details...');
-      await loadFullTournament(idx);
-  }
-  renderTournamentScreen();showScreen('screen-tournament');
-}
+function openTournament(idx){activeTournIdx=idx;renderTournamentScreen();showScreen('screen-tournament')}
 function backToApp(){activeTournIdx=null;showScreen('screen-app');renderArena()}
 function getTournament(){if(activeTournIdx===null)return null;return getDB().tournaments[activeTournIdx]}
 
 function renderTournamentScreen(){
   const t=getTournament();if(!t)return;
   document.getElementById('t-scr-name').textContent=t.name;
-  const fmtLabel = t.format==='league' ? '🏅 League' : (t.format==='groups' ? '🧩 Group Stage' : '🌳 Elimination');
-  document.getElementById('t-scr-meta').innerHTML=`${t.type.toUpperCase()} · ${fmtLabel} · <span style="color:${t.status==='active'?'var(--green)':'var(--sub)'}">● ${t.status==='active'?'LIVE':'ENDED'}</span>`;
+  const archTag=t.archivedAt?' · <span style="color:var(--sub)">📦 ARCHIVED</span>':'';
+  document.getElementById('t-scr-meta').innerHTML=`${t.type.toUpperCase()} · ${t.format==='league'?'🏅 League':'🌳 Elimination'} · <span style="color:${t.status==='active'?'var(--green)':'var(--sub)'}">● ${t.status==='active'?'LIVE':'ENDED'}</span>${archTag}`;
   renderNextMatch(t);
   renderStandings();
   renderMatchHistory();
 
   const ctrl=document.getElementById('admin-ctrl');
-  ctrl.style.display=(currentUser?.type==='admin'&&t.status==='active')?'block':'none';
+  const isAdmin=currentUser?.type==='admin';
+  ctrl.style.display=isAdmin?'block':'none';
+  const isActive=t.status==='active';
+  const btnRecord=document.getElementById('btn-record'); if(btnRecord)btnRecord.style.display=isActive?'':'none';
+  const btnEditLast=document.getElementById('btn-edit-last');
+  if(btnEditLast)btnEditLast.style.display=(isActive&&t.phase!=='elimination'&&t.matches&&t.matches.length>0)?'':'none';
+  const btnEnd=document.getElementById('btn-end'); if(btnEnd)btnEnd.style.display=isActive?'':'none';
+  const btnArchiveT=document.getElementById('btn-archive-t');
+  if(btnArchiveT)btnArchiveT.textContent=t.archivedAt?'✅ UN-ARCHIVE TOURNAMENT':'📦 ARCHIVE TOURNAMENT';
 
-  // بند 39: زر التأهل يظهر فقط لما كل مباريات الجدول (دوري أو كل المجموعات) تكون خلصت فعليًا
+  // Show Qualify button only when in group phase (league with pending elimination)
   const qBtn=document.getElementById('btn-qualify');
-  const allPlayed = t.schedule && t.schedule.length>0 && t.schedule.every(m=>m.played);
-  if(qBtn) qBtn.style.display=(t.phase==='group' && allPlayed)?'flex':'none';
+  if(qBtn){
+    qBtn.style.display=(isActive&&(t.phase==='group'||t.phase==='groups'))?'flex':'none';
+    qBtn.innerHTML=t.phase==='groups'?'⚡ QUALIFY GROUP WINNERS':'⚡ QUALIFY TOP PLAYERS';
+  }
 }
 
 // ============================================================
@@ -1042,47 +816,18 @@ function renderTournamentScreen(){
 async function qualifyToKnockout(){
   const db=getDB();
   const t=db.tournaments[activeTournIdx];
-  if(!t||t.phase!=='group')return;
-
-  // بند 39 (دفاع إضافي): تأكيد إن كل مباريات الجدول اتلعبت فعلاً قبل التأهيل، حتى لو الزر ظهر بالغلط لأي سبب
-  if(!t.schedule || t.schedule.length===0 || !t.schedule.every(m=>m.played)){
-    snack('⚠️ Not all matches have been played yet!');
-    return;
-  }
-
-  if(t.format==='groups' && t.groups){
-    // بند 9، 21، 22: تأهيل من كل مجموعة على حدة + تجنب تكرار المجموعة + سيدنج بسيط
-    const qualifiersByGroup = t.groups.map(g => {
-      const groupSorted = sortedGroupStandings(t, g.index);
-      return groupSorted.slice(0, g.qualifiers).map(s=>s.id);
-    });
-    const allQualifiedNames = qualifiersByGroup.flat().map(id=>{
-      const s=t.standings.find(x=>x.id===id); return s?.name||id;
-    });
-    // بند 6/7: توضيح مين المتأهل بالاسم قبل التأكيد
-    if(!confirm(`Qualify these ${allQualifiedNames.length} players to the Knockout Tree?\n\n${allQualifiedNames.join('\n')}`))return;
-    t.phase='elimination';
-    t.bracket=generateGroupBracket(qualifiersByGroup, t.type);
-
-    await saveSingleTournament(t);
-    localStorage.setItem(DB_KEY, JSON.stringify(db));
-
-    addNews(`⚡ Qualified to Knockout in "${t.name}": ${allQualifiedNames.join(', ')}`,'⚡');
-    snack(`✅ ${allQualifiedNames.length} players qualified! Bracket generated.`);
-    renderTournamentScreen();
-    return;
-  }
+  if(!t)return;
+  if(t.phase==='groups')return qualifyGroupsToKnockout(db,t);
+  if(t.phase!=='group')return;
 
   const qNum=parseInt(prompt('How many players qualify to the Knockout Tree?\nEnter 2, 4, 8, or 16:'));
   if(![2,4,8,16].includes(qNum)){snack('⚠️ Enter 2, 4, 8, or 16');return}
   if(qNum>=t.participants.length){snack('⚠️ Number must be less than total players');return}
 
+  if(!confirm(`Qualify Top ${qNum} players to the Knockout Tree?`))return;
+
   const sorted=sortedStandings(t);
   const topPlayers=sorted.slice(0,qNum).map(s=>s.id);
-  const topNames=sorted.slice(0,qNum).map(s=>s.name);
-
-  // بند 6/7: توضيح مين المتأهل بالاسم قبل التأكيد
-  if(!confirm(`Qualify these Top ${qNum} players to the Knockout Tree?\n\n${topNames.join('\n')}`))return;
 
   t.phase='elimination';
   t.bracket=generateBracket(topPlayers,t.type);
@@ -1091,8 +836,40 @@ async function qualifyToKnockout(){
   await saveSingleTournament(t);
   localStorage.setItem(DB_KEY, JSON.stringify(db));
 
-  addNews(`⚡ Top ${qNum} qualified to the Knockout stage of "${t.name}": ${topNames.join(', ')}`,'⚡');
+  addNews(`⚡ Top ${qNum} players qualified to the Knockout stage of "${t.name}"!`,'⚡');
   snack(`✅ Top ${qNum} qualified! Bracket generated.`);
+  renderTournamentScreen();
+}
+
+async function qualifyGroupsToKnockout(db,t){
+  if(!t.groups||!t.groups.length){snack('⚠️ No groups found on this tournament.');return}
+  const unplayed=(t.schedule||[]).filter(m=>!m.played).length;
+
+  let qualifiedIds=[];
+  let previewLines=[];
+  t.groups.forEach((g,gi)=>{
+    const groupStandings=t.standings.filter(s=>s.group===gi).sort((a,b)=>compareStandings(t,a,b));
+    const n=g.qualifiers||2;
+    const picks=groupStandings.slice(0,n);
+    qualifiedIds.push(...picks.map(s=>s.id));
+    previewLines.push(`${g.name}: ${picks.map(s=>s.name).join(', ')}`);
+  });
+  if(qualifiedIds.length<2){snack('⚠️ Not enough qualifiers to build a bracket!');return}
+
+  const headerMsg = unplayed>0
+    ? `⚠️ ${unplayed} group-stage match(es) are still unplayed.\n\n`
+    : `🎉 All group matches are complete!\n\n`;
+  const confirmMsg = `${headerMsg}Qualifiers for the Knockout Tree:\n${previewLines.join('\n')}\n\nGenerate the tree now?`;
+  if(!confirm(confirmMsg))return;
+
+  t.phase='elimination';
+  t.bracket=generateBracket(qualifiedIds,t.type);
+
+  await saveSingleTournament(t);
+  localStorage.setItem(DB_KEY, JSON.stringify(db));
+
+  addNews(`⚡ Group stage complete for "${t.name}"! ${qualifiedIds.length} qualified to the Knockout Tree.`,'⚡');
+  snack(`✅ ${qualifiedIds.length} qualified! Bracket generated.`);
   renderTournamentScreen();
 }
 
@@ -1100,14 +877,14 @@ function renderNextMatch(t){
   const section=document.getElementById('next-match-section');
   if(!t.schedule&&!t.bracket){section.innerHTML='';return}
   let nextA='',nextB='',roundLabel='';
-  if(t.phase==='group'&&t.schedule){
+  if((t.phase==='group'||t.phase==='groups')&&t.schedule){
     const next=t.schedule.find(m=>!m.played);
     if(next){
       const sA=t.standings.find(s=>s.id===next.aId);
       const sB=t.standings.find(s=>s.id===next.bId);
       nextA=sA?.name||next.aId;nextB=sB?.name||next.bId;
-      const groupTag = (t.format==='groups' && t.groups && next.groupIndex!==undefined) ? `Group ${groupLabel(next.groupIndex)} · ` : '';
-      roundLabel=`${groupTag}Matchday · Leg ${next.leg}`;
+      const gName=(t.phase==='groups'&&t.groups&&t.groups[next.group])?t.groups[next.group].name+' · ':'';
+      roundLabel=`${gName}Matchday · Leg ${next.leg}`;
     }
   } else if(t.bracket){
     for(let r=0;r<t.bracket.length;r++){
@@ -1117,10 +894,6 @@ function renderNextMatch(t){
         nextA=getN(match.p1);nextB=getN(match.p2);
         const rNames=['Round of 32','Round of 16','Quarter-Final','Semi-Final','Final'];
         roundLabel=rNames[r]||`Round ${r+1}`;
-        if((t.legs||1)>1){
-          const playedLegs=(match.legsPlayed||[]).length;
-          roundLabel += ` · Leg ${playedLegs+1} of ${t.legs}`;
-        }
         break;
       }
     }
@@ -1137,19 +910,28 @@ function renderNextMatch(t){
   </div>`;
 }
 
-function sortedStandings(t){
-  return[...t.standings].sort((a,b)=>
-    b.PTS-a.PTS ||
-    b.GD-a.GD ||
-    (a.redCount||0)-(b.redCount||0) ||
-    (a.yellowCount||0)-(b.yellowCount||0) ||
-    a.GA-b.GA
-  );
+// ============================================================
+// STANDINGS COMPARATOR — PTS, then Head-to-Head, then GD, then GF
+// ============================================================
+function headToHeadPts(t,idA,idB){
+  let ptsA=0,ptsB=0;
+  (t.matches||[]).forEach(m=>{
+    if(m.aId===idA&&m.bId===idB){
+      if(m.goalsA>m.goalsB)ptsA+=3;else if(m.goalsA<m.goalsB)ptsB+=3;else{ptsA++;ptsB++;}
+    } else if(m.aId===idB&&m.bId===idA){
+      if(m.goalsA>m.goalsB)ptsB+=3;else if(m.goalsA<m.goalsB)ptsA+=3;else{ptsA++;ptsB++;}
+    }
+  });
+  return{ptsA,ptsB};
 }
-// بند 35: نفس الترتيب لكن لمجموعة واحدة بعينها
-function sortedGroupStandings(t, groupIndex){
-  return sortedStandings(t).filter(s => s.groupIndex === groupIndex);
+function compareStandings(t,a,b){
+  if(b.PTS!==a.PTS)return b.PTS-a.PTS;
+  const h2h=headToHeadPts(t,a.id,b.id);
+  if(h2h.ptsA!==h2h.ptsB)return h2h.ptsB-h2h.ptsA;
+  if(b.GD!==a.GD)return b.GD-a.GD;
+  return(b.GF||0)-(a.GF||0);
 }
+function sortedStandings(t){return[...t.standings].sort((a,b)=>compareStandings(t,a,b))}
 
 function renderStandings(){
   const t=getTournament();if(!t)return;
@@ -1158,19 +940,9 @@ function renderStandings(){
     document.getElementById('standings-sub-hdr').textContent='🌳 Bracket';
     content.innerHTML=`<div class="bracket-scroll"><div class="bracket-container" id="bracket-inner"></div></div>`;
     renderBracket(t);
-  } else if(t.format==='groups' && t.groups && t.groups.length>0){
-    // بند 35: جدول ترتيب منفصل لكل مجموعة، بتظليل يتناسب مع عدد المتأهلين الخاص بها
-    document.getElementById('standings-sub-hdr').textContent='📊 Group Standings';
-    content.innerHTML = t.groups.map(g => `
-      <div style="margin-bottom:18px">
-        <div class="pot-lbl" style="color:${g.color};font-size:14px;font-weight:800;margin-bottom:6px">🧩 ${g.name}</div>
-        <div id="group-table-${g.index}"></div>
-      </div>
-    `).join('');
-    t.groups.forEach(g => {
-      const tableEl = document.getElementById(`group-table-${g.index}`);
-      if(tableEl) renderLeagueTable(t, tableEl, g.index, g.qualifiers);
-    });
+  } else if(t.phase==='groups'&&t.groups){
+    document.getElementById('standings-sub-hdr').textContent='🧩 Group Stage';
+    renderGroupsStandings(t,content);
   } else {
     document.getElementById('standings-sub-hdr').textContent='📊 Live Standings';
     renderLeagueTable(t,content);
@@ -1178,15 +950,44 @@ function renderStandings(){
 }
 
 // ============================================================
+// REAL GROUP-STAGE STANDINGS RENDERER (separate table per group)
+// ============================================================
+function renderGroupsStandings(t,content){
+  const db=getDB();
+  let html='';
+  t.groups.forEach((g,gi)=>{
+    const sorted=t.standings.filter(s=>s.group===gi).sort((a,b)=>compareStandings(t,a,b));
+    const qual=g.qualifiers||2;
+    html+=`<div style="margin-bottom:20px">
+      <div style="font-weight:800;color:var(--gold);font-size:14px;margin-bottom:8px">${g.name} <span style="color:var(--sub);font-weight:600;font-size:11px">— Top ${qual} qualify</span></div>
+      <table class="standings-table">
+        <thead><tr><th>#</th><th style="text-align:left">Club / Player</th><th>PL</th><th>GD</th><th>PTS</th></tr></thead>
+        <tbody>${sorted.map((p,i)=>{
+          const rowClass=i<qual?'row-blue':'';
+          return`<tr class="${rowClass}" onclick="openProfileByName('${encodeURIComponent(p.name)}')">
+            <td><span class="s-rank ${i===0?'g':''}">${i===0?'👑':i+1}</span></td>
+            <td style="text-align:left"><div style="display:flex;align-items:center;gap:10px">${getMiniAv(p.id,t,db)}<span style="font-weight:800;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:110px">${p.name}</span></div></td>
+            <td style="font-weight:700;color:var(--sub)">${p.PL}</td>
+            <td style="font-weight:700;color:${p.GD>0?'var(--green)':p.GD<0?'var(--red)':'var(--sub)'}">${p.GD>0?'+':''}${p.GD}</td>
+            <td style="font-family:'Bebas Neue',sans-serif;font-size:20px;color:var(--gold);text-shadow:0 0 10px rgba(240,180,41,0.2)">${p.PTS}</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table>
+    </div>`;
+  });
+  content.innerHTML=html;
+}
+
+// ============================================================
 // INTERACTIVE LEAGUE TABLE RENDERER
 // ============================================================
-function renderLeagueTable(t,content,groupIndex=null,qualifierCount=null){
+function renderLeagueTable(t,content){
   const db = getDB();
-  const sorted = groupIndex!==null ? sortedGroupStandings(t, groupIndex) : sortedStandings(t);
+  const sorted=sortedStandings(t);
   const n=sorted.length;
-  const topCount = groupIndex!==null ? (qualifierCount||0) : 2;
+  const topCount=2;
   let relegCount=0;
-  if(groupIndex===null && n>4)relegCount=Math.max(1,Math.floor(n*0.25));
+  if(n>4)relegCount=Math.max(1,Math.floor(n*0.25));
 
   content.innerHTML=`<table class="standings-table">
     <thead>
@@ -1228,12 +1029,9 @@ function renderLeagueTable(t,content,groupIndex=null,qualifierCount=null){
     }).join('')}</tbody>
   </table>
   ${topCount>0?`<div style="display:flex;gap:12px;margin-top:16px;font-size:11px;font-weight:700;background:rgba(17,17,37,0.8);padding:12px;border-radius:12px;border:1px solid var(--border);justify-content:center">
-    <span style="color:var(--blue)">🔵 Top ${topCount} — Qualify</span>
+    <span style="color:var(--blue)">🔵 Top ${topCount} — Home Advantage</span>
     ${relegCount>0?`<span style="color:var(--red)">🔴 Relegation Zone</span>`:''}
-  </div>`:''}
-  <div style="margin-top:10px;font-size:11px;color:var(--sub);text-align:center;line-height:1.6">
-    ℹ️ Tie-break order: Goal Difference → Fewer Red Cards → Fewer Yellow Cards → Fewer Goals Conceded
-  </div>`;
+  </div>`:''}`;
 }
 
 // ============================================================
@@ -1265,14 +1063,14 @@ function renderBracket(t){
             ${getMiniAv(m.p1, t, getDB())}
             <span class="${m.winner===m.p1?'b-winner':''} ${isTbd1?'b-tbd':''}" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${n1}</span>
           </div>
-          ${m.score1!==null?`<span class="b-score">${m.score1}${m.wonOnPenalties?' <small style="font-size:9px">(P)</small>':''}</span>`:''}
+          ${m.score1!==null?`<span class="b-score">${m.score1}</span>`:''}
         </div>
         <div class="b-player">
           <div style="display:flex;align-items:center;gap:8px;overflow:hidden">
             ${getMiniAv(m.p2, t, getDB())}
             <span class="${m.winner===m.p2?'b-winner':''} ${isTbd2?'b-tbd':''}" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${isTbd2?'TBD':n2}</span>
           </div>
-          ${m.score2!==null?`<span class="b-score">${m.score2}${m.wonOnPenalties?' <small style="font-size:9px">(P)</small>':''}</span>`:''}
+          ${m.score2!==null?`<span class="b-score">${m.score2}</span>`:''}
         </div>
       </div>`;
     });
@@ -1332,30 +1130,6 @@ function renderMatchHistory(){
 // ============================================================
 // THE MASTER MATCH CONSOLE (Replaces old openRecord)
 // ============================================================
-// بند 40: تقييد قايمة اختيار الخصم بالمباريات المتبقية غير الملعوبة فقط (في مرحلة الدوري/المجموعات)
-function onRecordHomeChange(){
-  const t=getTournament();
-  const aId=document.getElementById('rec-a').value;
-  const bSelect=document.getElementById('rec-b');
-  if(t && t.phase==='group' && t.schedule && aId){
-    const validOpponents = new Set();
-    t.schedule.forEach(m=>{
-      if(m.played) return;
-      if(m.aId===aId) validOpponents.add(m.bId);
-      if(m.bId===aId) validOpponents.add(m.aId);
-    });
-    Array.from(bSelect.options).forEach(opt=>{
-      if(!opt.value) return; // اترك "— Select —" ظاهر دايمًا
-      opt.disabled = !validOpponents.has(opt.value);
-      opt.style.display = validOpponents.has(opt.value) ? '' : 'none';
-    });
-    if(bSelect.value && !validOpponents.has(bSelect.value)) bSelect.value='';
-  } else {
-    Array.from(bSelect.options).forEach(opt=>{ opt.disabled=false; opt.style.display=''; });
-  }
-  buildMatchConsole();
-}
-
 function openRecord(){
   const t=getTournament();if(!t)return;
   hideErr('rec-err');
@@ -1373,20 +1147,21 @@ function openRecord(){
   }
   const opts=poolStandings.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
   let scheduleHint='';
-  let nextMatch=null;
-  if(t.phase==='group'&&t.schedule){
-    nextMatch=t.schedule.find(m=>!m.played);
-    if(nextMatch){
-      const sA=t.standings.find(s=>s.id===nextMatch.aId);
-      const sB=t.standings.find(s=>s.id===nextMatch.bId);
+  if((t.phase==='group'||t.phase==='groups')&&t.schedule){
+    const next=t.schedule.find(m=>!m.played);
+    if(next){
+      const sA=t.standings.find(s=>s.id===next.aId);
+      const sB=t.standings.find(s=>s.id===next.bId);
+      const gName=(t.phase==='groups'&&t.groups&&t.groups[next.group])?t.groups[next.group].name+' — ':'';
       scheduleHint=`<div style="background:rgba(240,180,41,0.08);border:1px solid rgba(240,180,41,0.15);border-radius:9px;padding:10px 14px;margin-bottom:12px;font-size:13px">
-        <span style="color:var(--gold);font-weight:700">📅 Scheduled: </span>${sA?.name} vs ${sB?.name} (Leg ${nextMatch.leg}) <span style="color:var(--green);font-size:11px">✓ Pre-filled</span>
+        <span style="color:var(--gold);font-weight:700">📅 ${gName}Scheduled: </span>${sA?.name} vs ${sB?.name} (Leg ${next.leg})
+        <button onclick="autoFillScheduled('${next.aId}','${next.bId}')" style="margin-left:8px;background:rgba(240,180,41,0.1);color:var(--gold);border:1px solid rgba(240,180,41,0.2);padding:4px 10px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;font-family:'Rajdhani',sans-serif">AUTO-FILL</button>
       </div>`;
     }
   }
   document.getElementById('record-body').innerHTML=`
     ${scheduleHint}
-    <div class="field"><label>Home</label><select class="select-field" id="rec-a" onchange="onRecordHomeChange()"><option value="">— Select —</option>${opts}</select></div>
+    <div class="field"><label>Home</label><select class="select-field" id="rec-a" onchange="buildMatchConsole()"><option value="">— Select —</option>${opts}</select></div>
     <div class="field"><label>Away</label><select class="select-field" id="rec-b" onchange="buildMatchConsole()"><option value="">— Select —</option>${opts}</select></div>
     <div id="master-console" style="margin-top:15px"></div>
     <div style="margin-top:15px; border-top:1px solid var(--border); padding-top:15px">
@@ -1397,8 +1172,6 @@ function openRecord(){
       </div>
     </div>`;
   document.getElementById('modal-record').classList.add('active');
-  // بند 4-أ: ملء المباراة القادمة تلقائيًا من غير أي ضغطة زيادة (بدل زرار AUTO-FILL يدوي)
-  if(nextMatch){ document.getElementById('rec-a').value=nextMatch.aId; document.getElementById('rec-b').value=nextMatch.bId; buildMatchConsole(); }
 }
 
 function buildMatchConsole() {
@@ -1415,93 +1188,87 @@ function buildMatchConsole() {
     const tA = t.standings.find(p => p.id === aId);
     const tB = t.standings.find(p => p.id === bId);
 
-    let legIndicator = '';
-    if(t.phase==='elimination' && t.bracket && (t.legs||1) > 1){
-        let foundMatch=null;
-        t.bracket.forEach(round=>round.forEach(m=>{ if((m.p1===aId&&m.p2===bId)||(m.p1===bId&&m.p2===aId)) foundMatch=m; }));
-        if(foundMatch){
-            const played = (foundMatch.legsPlayed||[]).length;
-            const total = t.legs||1;
-            if(foundMatch.winner){
-                legIndicator = `<div style="background:rgba(6,215,123,0.08);border:1px solid rgba(6,215,123,0.2);border-radius:9px;padding:8px 12px;margin-bottom:10px;font-size:12px;color:var(--green);font-weight:700">✅ This tie is already decided.</div>`;
-            } else {
-                legIndicator = `<div style="background:rgba(240,180,41,0.08);border:1px solid rgba(240,180,41,0.15);border-radius:9px;padding:8px 12px;margin-bottom:10px;font-size:12px;color:var(--gold);font-weight:700">🔁 Leg ${played+1} of ${total}${played>0?` — Aggregate so far: ${foundMatch.score1||0} - ${foundMatch.score2||0}`:''}</div>`;
-            }
-        }
+    if(t.phase==='groups' && tA.group!==tB.group){
+        const gAName = t.groups?.[tA.group]?.name || '?';
+        const gBName = t.groups?.[tB.group]?.name || '?';
+        consoleDiv.innerHTML = `<div style="color:var(--red);font-size:13px;padding:12px;background:rgba(255,71,87,0.08);border:1px solid rgba(255,71,87,0.2);border-radius:8px">⚠️ ${tA.name} is in ${gAName} and ${tB.name} is in ${gBName} — group-stage matches can only be recorded between two players in the <strong>same group</strong>.</div>`;
+        return;
     }
 
-    let guestAssistHTML = '';
-    if(t.format==='league' && t.guestAssistEnabled && t.phase==='group'){
-      const top2Ids = sortedStandings(t).slice(0,2).map(s=>s.id);
-      if(top2Ids.includes(aId) || top2Ids.includes(bId)){
-        const otherParticipants = t.standings.filter(s => s.id!==aId && s.id!==bId);
-        if(otherParticipants.length>0){
-          guestAssistHTML = `<div style="margin-top:10px;background:rgba(124,92,255,0.06);border:1px solid rgba(124,92,255,0.2);border-radius:10px;padding:12px">
-            <div style="font-size:11px;font-weight:700;color:var(--purple);margin-bottom:8px">🎯 GUEST PLAYER ASSIST (Top 2 Privilege)</div>
-            <select class="select-field" id="guest-pid" style="margin-bottom:8px">
-              <option value="">— No Guest —</option>
-              ${otherParticipants.map(s=>`<option value="${s.id}">${s.name}</option>`).join('')}
-            </select>
-            <div style="display:flex;align-items:center;gap:10px">
-              <label style="font-size:12px;flex:1">Guest Goals (max 2)</label>
-              <input type="number" id="guest-goals" class="score-in" style="width:60px;font-size:18px;padding:6px" value="0" min="0" max="2">
-              <select id="guest-side" style="padding:8px;border-radius:8px;background:var(--surface);border:1px solid var(--border);color:var(--text)">
-                <option value="a">For Home</option>
-                <option value="b">For Away</option>
-              </select>
-            </div>
-          </div>`;
-        }
-      }
-    }
+    const cardPill=(pid,type,label)=>{
+        const chkId=`${type}-${pid}`;
+        return `<span class="p-chip" style="padding:6px 12px;font-size:15px" onclick="toggleCardBtn(this,'${chkId}','${type==='y'?'var(--gold)':'var(--red)'}')">${label}</span><input type="checkbox" id="${chkId}" style="display:none">`;
+    };
 
     if(t.type === '1v1') {
         consoleDiv.innerHTML = `
-            ${legIndicator}
             <div class="score-row">
               <div class="score-team" style="color:var(--sub)">${tA.name}</div>
-              <input type="number" id="sc-a" class="score-in" value="0" min="0" max="99">
+              <div style="display:flex;align-items:center;gap:6px">
+                <span class="p-chip" style="padding:4px 10px;font-weight:800" onclick="stepNum('sc-a',-1)">−</span>
+                <input type="number" id="sc-a" class="score-in" value="0" min="0" max="99">
+                <span class="p-chip" style="padding:4px 10px;font-weight:800" onclick="stepNum('sc-a',1)">+</span>
+              </div>
               <div class="score-vs">VS</div>
-              <input type="number" id="sc-b" class="score-in" value="0" min="0" max="99">
+              <div style="display:flex;align-items:center;gap:6px">
+                <span class="p-chip" style="padding:4px 10px;font-weight:800" onclick="stepNum('sc-b',-1)">−</span>
+                <input type="number" id="sc-b" class="score-in" value="0" min="0" max="99">
+                <span class="p-chip" style="padding:4px 10px;font-weight:800" onclick="stepNum('sc-b',1)">+</span>
+              </div>
               <div class="score-team" style="color:var(--sub)">${tB.name}</div>
             </div>
-            <div style="display:flex; justify-content:space-between; margin-top:10px; font-size:12px; background:var(--card); padding:10px; border-radius:8px">
-                <div>
-                    <span style="color:var(--sub); font-size:10px; display:block; margin-bottom:5px">CARDS FOR HOME:</span>
-                    <label><input type="checkbox" id="y-${aId}" onchange="mutuallyExcludeCard('${aId}','y')"> 🟨</label>
-                    <label style="margin-left:5px"><input type="checkbox" id="r-${aId}" onchange="mutuallyExcludeCard('${aId}','r')"> 🟥</label>
-                </div>
-                <div style="text-align:right">
-                    <span style="color:var(--sub); font-size:10px; display:block; margin-bottom:5px">CARDS FOR AWAY:</span>
-                    <label><input type="checkbox" id="y-${bId}" onchange="mutuallyExcludeCard('${bId}','y')"> 🟨</label>
-                    <label style="margin-left:5px"><input type="checkbox" id="r-${bId}" onchange="mutuallyExcludeCard('${bId}','r')"> 🟥</label>
+            <div class="settings-card" style="padding:12px;margin-top:10px;margin-bottom:0">
+                <div class="settings-title" style="font-size:11px">🟨🟥 Cards</div>
+                <div style="display:flex; justify-content:space-between; align-items:center">
+                    <div>
+                        <span style="color:var(--sub); font-size:10px; display:block; margin-bottom:6px">${tA.name}</span>
+                        <div style="display:flex;gap:6px">${cardPill(aId,'y','🟨')}${cardPill(aId,'r','🟥')}</div>
+                    </div>
+                    <div style="text-align:right">
+                        <span style="color:var(--sub); font-size:10px; display:block; margin-bottom:6px">${tB.name}</span>
+                        <div style="display:flex;gap:6px;justify-content:flex-end">${cardPill(bId,'y','🟨')}${cardPill(bId,'r','🟥')}</div>
+                    </div>
                 </div>
             </div>
-            ${guestAssistHTML}
         `;
     } else {
         const renderPlayerRow = (pid, pname) => `
-            <div style="display:flex; align-items:center; justify-content:space-between; background:var(--card); padding:8px; margin-bottom:5px; border-radius:8px; border:1px solid var(--border)">
-                <div style="font-size:12px; font-weight:700; width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">${pname}</div>
+            <div style="display:flex; align-items:center; justify-content:space-between; background:var(--card2); padding:10px 12px; margin-bottom:6px; border-radius:10px; border:1px solid var(--border)">
+                <div style="font-size:13px; font-weight:700; width:90px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">${pname}</div>
                 <div style="display:flex; align-items:center; gap:8px">
-                    ⚽ <input type="number" id="g-${pid}" value="0" min="0" style="width:40px; background:var(--card2); border:1px solid var(--border); color:white; border-radius:4px; text-align:center; font-family:'Bebas Neue', sans-serif; font-size:16px; padding:2px">
-                    <label><input type="checkbox" id="y-${pid}" onchange="mutuallyExcludeCard('${pid}','y')"> 🟨</label>
-                    <label><input type="checkbox" id="r-${pid}" onchange="mutuallyExcludeCard('${pid}','r')"> 🟥</label>
+                    <span class="p-chip" style="padding:4px 9px;font-weight:800" onclick="stepNum('g-${pid}',-1)">−</span>
+                    ⚽ <input type="number" id="g-${pid}" value="0" min="0" style="width:36px; background:var(--card); border:1px solid var(--border); color:white; border-radius:6px; text-align:center; font-family:'Bebas Neue', sans-serif; font-size:16px; padding:4px">
+                    <span class="p-chip" style="padding:4px 9px;font-weight:800" onclick="stepNum('g-${pid}',1)">+</span>
+                    ${cardPill(pid,'y','🟨')}${cardPill(pid,'r','🟥')}
                 </div>
             </div>
         `;
         
         consoleDiv.innerHTML = `
-            ${legIndicator}
-            <div style="font-size:11px; color:var(--gold); margin-bottom:5px; text-transform:uppercase; font-weight:bold">Home Team (${tA.name})</div>
-            ${renderPlayerRow(tA.proId, tA.proName)}
-            ${renderPlayerRow(tA.youthId, tA.youthName)}
-            
-            <div style="font-size:11px; color:var(--gold); margin-top:15px; margin-bottom:5px; text-transform:uppercase; font-weight:bold">Away Team (${tB.name})</div>
-            ${renderPlayerRow(tB.proId, tB.proName)}
-            ${renderPlayerRow(tB.youthId, tB.youthName)}
+            <div class="settings-card" style="padding:12px;margin-bottom:8px">
+              <div class="settings-title" style="font-size:11px;color:var(--gold)">🏠 HOME — ${tA.name}</div>
+              ${renderPlayerRow(tA.proId, tA.proName)}
+              ${renderPlayerRow(tA.youthId, tA.youthName)}
+            </div>
+            <div class="settings-card" style="padding:12px;margin-bottom:0">
+              <div class="settings-title" style="font-size:11px;color:var(--gold)">🚀 AWAY — ${tB.name}</div>
+              ${renderPlayerRow(tB.proId, tB.proName)}
+              ${renderPlayerRow(tB.youthId, tB.youthName)}
+            </div>
         `;
     }
+}
+function stepNum(id,delta){
+    const el=document.getElementById(id);if(!el)return;
+    let v=(parseInt(el.value)||0)+delta;
+    if(v<0)v=0;
+    el.value=v;
+}
+function toggleCardBtn(btn,chkId,activeColor){
+    const chk=document.getElementById(chkId);if(!chk)return;
+    chk.checked=!chk.checked;
+    if(chk.checked){btn.style.background=activeColor+'22';btn.style.borderColor=activeColor;btn.style.color=activeColor;}
+    else{btn.style.background='';btn.style.borderColor='';btn.style.color='';}
 }
 
 function autoFillScheduled(aId,bId){
@@ -1509,13 +1276,6 @@ function autoFillScheduled(aId,bId){
   document.getElementById('rec-a').value=aId;
   document.getElementById('rec-b').value=bId;
   buildMatchConsole(); 
-}
-
-// بند 21: منع اختيار الكرت الأصفر والأحمر معًا لنفس اللاعب في نفس المباراة
-function mutuallyExcludeCard(pid, changedType) {
-  const other = changedType === 'y' ? document.getElementById(`r-${pid}`) : document.getElementById(`y-${pid}`);
-  const changed = document.getElementById(`${changedType}-${pid}`);
-  if(changed && changed.checked && other) other.checked = false;
 }
 
 function submitWithdraw(whoQuit) {
@@ -1544,7 +1304,6 @@ function submitWithdraw(whoQuit) {
         }
     }
     snack('⚠️ Walkover applied: 3 - 0. Click SAVE RESULT.');
-    isWalkoverMatch = true;
 }
 
 // ============================================================
@@ -1553,40 +1312,6 @@ function submitWithdraw(whoQuit) {
 // ============================================================
 // THE SMART SAVE ENGINE (WITH BUTTON LOCK)
 // ============================================================
-// ============================================================
-// DELTA TRACKING (بند 4 - القسم الرابع): تتبع تأثير كل مباراة على كل لاعب
-// لدعم حذف البطولة الجارية لاحقًا مع التراجع عن الفرق فقط
-// ============================================================
-function snapshotPlayerStats(db, pid){
-  const p = db.players.find(x => x.id === pid);
-  if(!p) return null;
-  return {
-    xp: p.stats?.xp || 0, points: p.stats?.points || 0, goals: p.stats?.goals || 0,
-    elo: p.stats?.elo || 1000, red: p.stats?.red || 0, yellow: p.stats?.yellow || 0,
-    marketValue: p.marketValue || 1000000, status: p.status
-  };
-}
-function diffPlayerStats(before, after){
-  if(!before || !after) return null;
-  const d = {};
-  Object.keys(after).forEach(k => {
-    if(typeof after[k] === 'number' && after[k] !== before[k]) d[k] = after[k] - before[k];
-  });
-  const statusChange = (before.status !== after.status) ? {before: before.status, after: after.status} : null;
-  return {delta: d, statusChange};
-}
-function recordMatchDelta(db, t, matchTs, involvedIds, snapshotsBefore){
-  if(!t.status || t.status !== 'active') return; // بند 19: التتبع مفيد بس للبطولات الجارية القابلة للحذف
-  t.deltaLog = t.deltaLog || [];
-  involvedIds.forEach(pid => {
-    const after = snapshotPlayerStats(db, pid);
-    const diff = diffPlayerStats(snapshotsBefore[pid], after);
-    if(diff && (Object.keys(diff.delta).length > 0 || diff.statusChange)){
-      t.deltaLog.push({ matchTs, playerId: pid, delta: diff.delta, statusChange: diff.statusChange });
-    }
-  });
-}
-
 async function saveMatch(){
   hideErr('rec-err');
   const aId=document.getElementById('rec-a').value;
@@ -1601,6 +1326,11 @@ async function saveMatch(){
   const tB=t.standings.find(p=>p.id===bId);
   if(!tA||!tB) return;
 
+  if(t.phase==='groups' && tA.group!==tB.group){
+    showErr('rec-err','These two players are in different groups — you can only record matches within the same group.');
+    return;
+  }
+
   let goalsA = 0, goalsB = 0;
   if(t.type === '1v1') {
       goalsA = parseInt(document.getElementById('sc-a').value)||0;
@@ -1610,20 +1340,17 @@ async function saveMatch(){
       [tB.proId, tB.youthId].forEach(pid => { goalsB += parseInt(document.getElementById(`g-${pid}`).value)||0; });
   }
 
-  // بند 12: اللاعب المستضاف (Guest Assist) — أهدافه تُضاف على الجانب المختار وتُنسب شخصيًا له
-  let guestId = null, guestGoals = 0, guestSide = 'a';
-  const guestSelect = document.getElementById('guest-pid');
-  if(guestSelect && guestSelect.value){
-      guestId = guestSelect.value;
-      guestGoals = Math.max(0, Math.min(2, parseInt(document.getElementById('guest-goals').value)||0));
-      guestSide = document.getElementById('guest-side').value;
-      if(guestGoals > 0){
-          if(guestSide === 'a') goalsA += guestGoals; else goalsB += guestGoals;
-      }
+  // 🛑 ANTI-DRAW KNOCKOUT SHIELD
+  if (goalsA === goalsB && t.phase === 'elimination') {
+      showErr('rec-err', 'Knockout matches cannot end in a draw! Play penalties and add 1 goal to the winner.');
+      return;
   }
 
-  // بند 32: تم إزالة درع منع التعادل القديم — التعادل مسموح الآن في أي شوط (ذهاب/عودة/شوط وحيد).
-  // عند تعادل المجموع الكلي للمواجهة (بعد كل الأشواط)، updateBracket() بتحسم الفايز تلقائيًا بمحاكاة ركلات ترجيح (بند 6).
+  // 🛑 SANITY CHECK — catch obvious typos before they get saved
+  const highestSingleScore = Math.max(goalsA, goalsB);
+  if(highestSingleScore >= 15){
+      if(!confirm(`⚠️ ${highestSingleScore} goals in one match is unusually high — double-check the number.\n\nSave it anyway?`)) return;
+  }
 
   // 🛑 قفل الزر لمنع الضغط المزدوج
   const btn = document.querySelector('#modal-record .btn-green');
@@ -1631,11 +1358,7 @@ async function saveMatch(){
 
   let matchEvents = { goals: {}, cards: {} };
   if(t.type === '1v1') {
-      // بند 12: لو فيه لاعب مستضاف، نصيبه من الأهداف يُنسب له شخصيًا، والباقي للاعب الأساسي
-      const aOwnGoals = (guestId && guestSide==='a') ? Math.max(0, goalsA - guestGoals) : goalsA;
-      const bOwnGoals = (guestId && guestSide==='b') ? Math.max(0, goalsB - guestGoals) : goalsB;
-      matchEvents.goals[aId] = aOwnGoals; matchEvents.goals[bId] = bOwnGoals;
-      if(guestId && guestGoals>0) matchEvents.goals[guestId] = guestGoals;
+      matchEvents.goals[aId] = goalsA; matchEvents.goals[bId] = goalsB;
       if(document.getElementById(`y-${aId}`)?.checked) matchEvents.cards[aId] = 'yellow';
       if(document.getElementById(`r-${aId}`)?.checked) matchEvents.cards[aId] = 'red';
       if(document.getElementById(`y-${bId}`)?.checked) matchEvents.cards[bId] = 'yellow';
@@ -1657,17 +1380,9 @@ async function saveMatch(){
 
   const matchRecord={
       teamA:tA.name, teamB:tB.name, aId, bId, goalsA, goalsB, 
-      ts:Date.now(), votes:{}, motm:null, avgRatings:{}, events: matchEvents, isWalkover: isWalkoverMatch
+      ts:Date.now(), votes:{}, motm:null, avgRatings:{}, events: matchEvents 
   };
   t.matches.push(matchRecord);
-  // بند 7: الأهداف الوهمية للوالكوفر متأثرش على إحصائيات اللاعبين الشخصية (تفضل بس في الترتيب)
-  if(isWalkoverMatch){ Object.keys(matchEvents.goals).forEach(pid => matchEvents.goals[pid] = 0); }
-  isWalkoverMatch = false;
-
-  // Delta Tracking: أخذ لقطة "قبل" لكل اللاعبين المشاركين قبل أي تعديل على إحصائياتهم
-  const involvedIds = (t.type === '1v1' ? [aId, bId] : [tA.proId, tA.youthId, tB.proId, tB.youthId].filter(Boolean)).concat(guestId ? [guestId] : []);
-  const snapshotsBefore = {};
-  involvedIds.forEach(pid => { snapshotsBefore[pid] = snapshotPlayerStats(db, pid); });
 
   tA.PL++;tB.PL++;
   tA.GF+=goalsA;tA.GA+=goalsB;tB.GF+=goalsB;tB.GA+=goalsA;
@@ -1693,8 +1408,7 @@ async function saveMatch(){
       else if(isTeamB && goalsB < goalsA) matchResult = 'loss';
 
       updatePlayerMarketValue(db, pid, { result: matchResult, goals: g, card: card });
-      if(g > 0) {
-          // بند 9: الأهداف تُحتسب بالكامل بغض النظر عن الطرد بالأحمر (توحيد مع القيمة السوقية)
+      if(g > 0 && card !== 'red') { 
           const p = db.players.find(x => x.id === pid);
           if(p) { p.stats.goals = (p.stats.goals || 0) + g; awardXP(db, pid, g * 10); }
       }
@@ -1711,40 +1425,26 @@ async function saveMatch(){
   Object.keys(matchEvents.cards).forEach(pid => {
       const cardType = matchEvents.cards[pid]; const p = db.players.find(x => x.id === pid);
       if(!p) return;
-      let entryForCard = (t.type === '1v1') 
-          ? t.standings.find(s => s.id === pid) 
-          : t.standings.find(s => s.proId === pid || s.youthId === pid);
-      if(cardType === 'yellow') {
-          p.stats.yellow = (p.stats.yellow || 0) + 1;
-          if(entryForCard) entryForCard.yellowCount = (entryForCard.yellowCount || 0) + 1;
-      }
+      if(cardType === 'yellow') p.stats.yellow = (p.stats.yellow || 0) + 1;
       else if (cardType === 'red') {
           p.stats.red = (p.stats.red || 0) + 1; p.stats.points = (p.stats.points || 0) - 1; 
-          let entry = entryForCard;
+          let entry = (t.type === '1v1') 
+              ? t.standings.find(s => s.id === pid) 
+              : t.standings.find(s => s.proId === pid || s.youthId === pid);
           if(entry) {
-              entry.redCount = (entry.redCount || 0) + 1;
               entry.reds = entry.reds || {}; entry.reds[pid] = (entry.reds[pid] || 0) + 1;
-              // بند 2: خصم نقطة واحدة فورًا من ترتيب البطولة لكل كرت أحمر (سواء دوري أو مجموعات)
-              if(t.format === 'league' || t.format === 'groups') { entry.PTS -= 1; addNews(`🚨 RED CARD PENALTY: ${p.name}'s team loses 1 Point!`,'🚨'); }
-              // بند 1: الطرد يحصل مع الكرت الثالث (>=3) مش الرابع
-              if(entry.reds[pid] >= 3) {
-                  if(t.format === 'league' || t.format === 'groups') { entry.PTS -= 4; addNews(`🚨 SUSPENSION: ${p.name} exceeded 3 red cards. Team loses 4 additional Points!`,'🚨'); }
+              if(entry.reds[pid] > 3) {
+                  if(t.format === 'league') { entry.PTS -= 4; addNews(`🚨 PENALTY: ${p.name} exceeded 3 red cards. Team loses 4 Points!`,'🚨'); }
                   p.status = 'suspended'; 
               }
           }
       }
   });
 
-  const goalDiff = Math.abs(goalsA - goalsB); let headline = '';
-  if (goalsA > goalsB) headline = goalDiff >= 3 ? `💥 DEMOLITION: ${tA.name} destroys ${tB.name} ${goalsA}-${goalsB}!` : `👏 SOLID WIN: ${tA.name} edges past ${tB.name} ${goalsA}-${goalsB}.`;
-  else if (goalsB > goalsA) headline = goalDiff >= 3 ? `💥 DEMOLITION: ${tB.name} destroys ${tA.name} ${goalsB}-${goalsA}!` : `👏 SOLID WIN: ${tB.name} edges past ${tA.name} ${goalsB}-${goalsA}.`;
-  else headline = `🤝 STALEMATE: A tense battle ends ${goalsA}-${goalsB} between ${tA.name} and ${tB.name}.`;
-  
+  const goalDiff = Math.abs(goalsA - goalsB);
+  const headline = buildMatchHeadline(goalsA,goalsB,tA.name,tB.name,goalDiff);
   addNews(headline, '📰');
   checkAchievements(db, matchEvents);
-
-  // Delta Tracking: حساب الفرق "بعد" التعديلات وتسجيله في سجل البطولة
-  recordMatchDelta(db, t, matchRecord.ts, involvedIds, snapshotsBefore);
   
   // 🛡️ حزام الأمان (Try/Catch) لمنع تجمد الزر
   try {
@@ -1756,6 +1456,10 @@ async function saveMatch(){
           await saveSinglePlayer(db.players.find(x => x.id === tB.proId)); await saveSinglePlayer(db.players.find(x => x.id === tB.youthId));
       }
       localStorage.setItem(DB_KEY, JSON.stringify(db));
+
+      if(t.phase==='groups'&&t.autoQualify&&t.schedule&&t.schedule.length>0&&t.schedule.every(m=>m.played)){
+          await qualifyGroupsToKnockout(db,t);
+      }
 
       closeModal('modal-record');
       renderTournamentScreen();
@@ -1772,33 +1476,15 @@ async function saveMatch(){
 
 function updateBracket(t,aId,bId,goalsA,goalsB){
   if(!t.bracket)return;
-  const requiredLegs = t.legs || 1;
   for(let r=0;r<t.bracket.length;r++){
     for(let m=0;m<t.bracket[r].length;m++){
       const match=t.bracket[r][m];
       if((match.p1===aId&&match.p2===bId)||(match.p1===bId&&match.p2===aId)){
-        if(match.winner)return; // المواجهة اتحسمت خلاص
-
-        // بند 31: تسجيل كل شوط لوحده وتجميع الأهداف بمنظور p1/p2 الثابت
-        match.legsPlayed = match.legsPlayed || [];
-        const scoreP1 = match.p1===aId ? goalsA : goalsB;
-        const scoreP2 = match.p1===aId ? goalsB : goalsA;
-        match.legsPlayed.push({scoreP1, scoreP2});
-
-        match.score1 = match.legsPlayed.reduce((s,l)=>s+l.scoreP1,0);
-        match.score2 = match.legsPlayed.reduce((s,l)=>s+l.scoreP2,0);
-
-        if(match.legsPlayed.length < requiredLegs) return; // لسه في أشواط متبقية جوه نفس المواجهة
-
-        // بند 6: تعادل مجموع الأهداف بعد كل الأشواط → ركلات ترجيح (محاكاة عشوائية)
-        if(match.score1 !== match.score2){
-          match.winner = match.score1 > match.score2 ? match.p1 : match.p2;
-        } else {
-          match.winner = Math.random() < 0.5 ? match.p1 : match.p2;
-          match.wonOnPenalties = true;
-        }
-
-        if(match.winner && r+1<t.bracket.length){
+        if(match.winner)return;
+        match.score1=match.p1===aId?goalsA:goalsB;
+        match.score2=match.p1===aId?goalsB:goalsA;
+        match.winner=goalsA>goalsB?aId:goalsB>goalsA?bId:null;
+        if(match.winner&&r+1<t.bracket.length){
           const nextMatchIdx=Math.floor(m/2);
           const nextMatch=t.bracket[r+1][nextMatchIdx];
           if(!nextMatch)return;
@@ -1811,130 +1497,10 @@ function updateBracket(t,aId,bId,goalsA,goalsB){
   }
 }
 
-// ============================================================
-// TOURNAMENT DELETE & ARCHIVE (القسم 2-ب/ج): حذف البطولة الجارية فقط
-// مع التراجع عن الفروق (Delta Rollback)، وأرشفة لمدة 48 ساعة قابلة للاستعادة الكاملة
-// ============================================================
-async function deleteLiveTournament(){
-  const db=getDB();
-  const t=db.tournaments[activeTournIdx];
-  if(!t) return;
-  // بند 19: الحذف/الأرشفة يطبّق فقط على البطولة الجارية (Live)، البطولة المنتهية لا يمكن حذفها إطلاقًا
-  if(t.status!=='active'){ snack('⚠️ Ended tournaments cannot be deleted or archived.'); return; }
-
-  if(!confirm(`Are you sure you want to delete "${t.name}"? This will roll back all XP, ELO, and stats changes it caused.`)) return;
-  if(!confirm(`⚠️ FINAL CONFIRMATION: This is permanent unless restored within 48 hours from Recently Deleted. Proceed?`)) return;
-
-  // تجميع كل الفروق لكل لاعب عبر كل مباريات وأصوات البطولة دي
-  const perPlayerDelta = {};
-  const perPlayerFirstStatus = {};
-  (t.deltaLog||[]).forEach(entry => {
-    perPlayerDelta[entry.playerId] = perPlayerDelta[entry.playerId] || {};
-    Object.keys(entry.delta||{}).forEach(k => {
-      perPlayerDelta[entry.playerId][k] = (perPlayerDelta[entry.playerId][k]||0) + entry.delta[k];
-    });
-    if(entry.statusChange && !(entry.playerId in perPlayerFirstStatus)){
-      perPlayerFirstStatus[entry.playerId] = entry.statusChange.before;
-    }
-  });
-
-  const affectedPlayers = [];
-  Object.keys(perPlayerDelta).forEach(pid => {
-    const p = db.players.find(x=>x.id===pid);
-    if(!p) return;
-    const d = perPlayerDelta[pid];
-    if(typeof d.xp==='number') p.stats.xp = Math.max(0, (p.stats.xp||0) - d.xp);
-    if(typeof d.points==='number') p.stats.points = (p.stats.points||0) - d.points;
-    if(typeof d.goals==='number') p.stats.goals = Math.max(0, (p.stats.goals||0) - d.goals);
-    if(typeof d.elo==='number') p.stats.elo = (p.stats.elo||1000) - d.elo;
-    if(typeof d.red==='number') p.stats.red = Math.max(0, (p.stats.red||0) - d.red);
-    if(typeof d.yellow==='number') p.stats.yellow = Math.max(0, (p.stats.yellow||0) - d.yellow);
-    if(typeof d.marketValue==='number') p.marketValue = Math.max(100000, (p.marketValue||1000000) - d.marketValue);
-    if(pid in perPlayerFirstStatus) p.status = perPlayerFirstStatus[pid];
-    affectedPlayers.push(p);
-  });
-
-  // بند: أرشفة بدل الحذف النهائي الفوري (استعادة كاملة خلال 48 ساعة)
-  t.status = 'archived';
-  t.archivedAt = Date.now();
-
-  await Promise.all(affectedPlayers.map(p => saveSinglePlayer(p)));
-  await saveSingleTournament(t);
-  localStorage.setItem(DB_KEY, JSON.stringify(db));
-
-  snack(`🗑️ "${t.name}" moved to Recently Deleted. All stats rolled back.`);
-  activeTournIdx=null; showScreen('screen-app'); renderArena();
-}
-
-async function restoreArchivedTournament(idx){
-  const db=getDB();
-  const t=db.tournaments[idx];
-  if(!t || t.status!=='archived') return;
-  if(!confirm(`Restore "${t.name}"? This will re-apply all its stat changes to players.`)) return;
-
-  // إعادة تطبيق كل الفروق من جديد (استعادة كاملة)
-  const perPlayerDelta = {};
-  const perPlayerLastStatus = {};
-  (t.deltaLog||[]).forEach(entry => {
-    perPlayerDelta[entry.playerId] = perPlayerDelta[entry.playerId] || {};
-    Object.keys(entry.delta||{}).forEach(k => {
-      perPlayerDelta[entry.playerId][k] = (perPlayerDelta[entry.playerId][k]||0) + entry.delta[k];
-    });
-    if(entry.statusChange) perPlayerLastStatus[entry.playerId] = entry.statusChange.after;
-  });
-
-  const affectedPlayers = [];
-  Object.keys(perPlayerDelta).forEach(pid => {
-    const p = db.players.find(x=>x.id===pid);
-    if(!p) return;
-    const d = perPlayerDelta[pid];
-    if(typeof d.xp==='number') p.stats.xp = (p.stats.xp||0) + d.xp;
-    if(typeof d.points==='number') p.stats.points = (p.stats.points||0) + d.points;
-    if(typeof d.goals==='number') p.stats.goals = (p.stats.goals||0) + d.goals;
-    if(typeof d.elo==='number') p.stats.elo = (p.stats.elo||1000) + d.elo;
-    if(typeof d.red==='number') p.stats.red = (p.stats.red||0) + d.red;
-    if(typeof d.yellow==='number') p.stats.yellow = (p.stats.yellow||0) + d.yellow;
-    if(typeof d.marketValue==='number') p.marketValue = (p.marketValue||1000000) + d.marketValue;
-    if(pid in perPlayerLastStatus) p.status = perPlayerLastStatus[pid];
-    affectedPlayers.push(p);
-  });
-
-  t.status = 'active';
-  delete t.archivedAt;
-
-  await Promise.all(affectedPlayers.map(p => saveSinglePlayer(p)));
-  await saveSingleTournament(t);
-  localStorage.setItem(DB_KEY, JSON.stringify(db));
-  snack(`✅ "${t.name}" restored!`);
-  renderArena();
-}
-
-async function permanentlyDeleteTournament(idx){
-  const db=getDB();
-  const t=db.tournaments[idx];
-  if(!t) return;
-  try {
-    await supabaseClient.from('tournaments').delete().eq('id', t.id);
-  } catch(e){ console.error('Permanent delete failed', e); }
-  db.tournaments.splice(idx,1);
-  localStorage.setItem(DB_KEY, JSON.stringify(db));
-}
-
-// بند: فحص كسول (Lazy Check) — يتفقد الأرشيف كل مرة يفتح فيها التطبيق ويمسح ما تجاوز 48 ساعة
-async function cleanupExpiredArchive(){
-  const db=getDB();
-  const ARCHIVE_MS = 48*60*60*1000;
-  const now = Date.now();
-  const expired = db.tournaments.filter(t => t.status==='archived' && t.archivedAt && (now - t.archivedAt) > ARCHIVE_MS);
-  for(const t of expired){
-    const idx = db.tournaments.indexOf(t);
-    if(idx>=0) await permanentlyDeleteTournament(idx);
-  }
-}
 function awardXP(db,pid,xp){
   const p=db.players.find(x=>x.id===pid);if(!p)return;
   p.stats=p.stats||{xp:0,points:0,trophies:0,goals:0};
-  p.stats.xp=(p.stats.xp||0)+xp;
+  p.stats.xp=Math.max(0,(p.stats.xp||0)+xp);
 }
 
 // ============================================================
@@ -1946,7 +1512,6 @@ function awardXP(db,pid,xp){
 function openMotmVote(matchIdx){
   const t=getTournament();if(!t)return;
   const match=t.matches[matchIdx];if(!match)return;
-  if(match.isWalkover){ snack('⚠️ No voting on walkover matches!'); return; }
   if(!currentUser){snack('Login to vote!');return}
   const hasVoted=match.votes&&match.votes[currentUser.id];
   motmMatchIdx=matchIdx;
@@ -1954,22 +1519,15 @@ function openMotmVote(matchIdx){
   const db=getDB();
   
   let pids = [];
-  let partnerId = null;
   if(t.type === '1v1') pids = [match.aId, match.bId];
   else {
       const tA = t.standings.find(s=>s.id === match.aId);
       const tB = t.standings.find(s=>s.id === match.bId);
       if(tA) pids.push(tA.proId, tA.youthId);
       if(tB) pids.push(tB.proId, tB.youthId);
-      // بند 23: تحديد شريك المستخدم الحالي (لو كان جوه إحدى الفرق) لاستثنائه من التقييم
-      [tA, tB].forEach(team => {
-          if(team && (team.proId === currentUser.id || team.youthId === currentUser.id)){
-              partnerId = team.proId === currentUser.id ? team.youthId : team.proId;
-          }
-      });
   }
   
-  const validPids = pids.filter(id => (!match.events || !match.events.cards || match.events.cards[id] !== 'red') && id !== partnerId);
+  const validPids = pids.filter(id => !match.events || !match.events.cards || match.events.cards[id] !== 'red');
   const players = validPids.map(id => db.players.find(x=>x.id===id)||{id,name:id});
 
   let resultsHtml='';
@@ -1981,7 +1539,6 @@ function openMotmVote(matchIdx){
       motmCounts[p.id]=votes.length;
       const avgRating=votes.length?Math.round(votes.reduce((s,v)=>s+(v.ratings[p.id]||3),0)/votes.length*10)/10:0;
       resultsHtml+=`<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-        ${avHTML(p,32)}
         <span style="flex:1;font-size:13px;font-weight:600">${p.name}</span>
         <span style="color:var(--gold);font-size:12px">⭐ ${avgRating}/5</span>
         <span style="color:var(--sub);font-size:11px">${motmCounts[p.id]||0} MOTM votes</span>
@@ -2011,7 +1568,6 @@ function openMotmVote(matchIdx){
     votingHtml+=`<div class="motm-section" style="${isMe ? 'opacity:0.4; pointer-events:none' : ''}">
       <div class="motm-title">${isMe ? 'Fair Play: Cannot vote for yourself' : 'Rate: ' + p.name}</div>
       <div class="motm-player-row">
-        ${avHTML(p,38)}
         <div class="motm-name">${p.name}</div>
         <div class="motm-stars">
           ${[1,2,3,4,5].map(n=>`<button class="motm-star-btn" data-player="${p.id}" data-star="${n}" onclick="setMotmStar('${p.id}',${n})">⭐</button>`).join('')}
@@ -2052,26 +1608,6 @@ async function submitMotmVote(){
   if(!t){closeModal('modal-motm');return}
   const match=t.matches[motmMatchIdx];
   if(!match){closeModal('modal-motm');return}
-  if(match.isWalkover){closeModal('modal-motm');return}
-
-  // بند 22: التقييم بالنجوم إجباري لكل لاعب مؤهل قبل الحفظ
-  let ratablePids = [];
-  let partnerId0 = null;
-  if(t.type === '1v1') ratablePids = [match.aId, match.bId];
-  else {
-      const tA0 = t.standings.find(s=>s.id === match.aId);
-      const tB0 = t.standings.find(s=>s.id === match.bId);
-      if(tA0) ratablePids.push(tA0.proId, tA0.youthId);
-      if(tB0) ratablePids.push(tB0.proId, tB0.youthId);
-      [tA0, tB0].forEach(team => {
-          if(team && (team.proId === currentUser.id || team.youthId === currentUser.id)){
-              partnerId0 = team.proId === currentUser.id ? team.youthId : team.proId;
-          }
-      });
-  }
-  ratablePids = ratablePids.filter(id => id !== currentUser.id && id !== partnerId0 && (!match.events || !match.events.cards || match.events.cards[id] !== 'red'));
-  const missingRating = ratablePids.some(id => !motmVotes.ratings[id]);
-  if(missingRating){ showErr('motm-err','Please rate every player before submitting!'); return; }
   
   if(t.status === 'ended') {
       showErr('motm-err', 'Voting is permanently locked. The Cup has ended!');
@@ -2106,32 +1642,27 @@ async function submitMotmVote(){
   });
   
   const winner=Object.entries(motmCounts).sort((a,b)=>b[1]-a[1])[0];
-  const prevMotmId=match.motmId;
+  const prevMotmName=match.motm;
   let playersToSave = [];
-  // Delta Tracking لتغييرات MOTM (أخذ لقطة قبل أي تعديل)
-  const motmSnapBefore = {};
-  if(prevMotmId) motmSnapBefore[prevMotmId] = snapshotPlayerStats(db, prevMotmId);
-  if(winner) motmSnapBefore[winner[0]] = motmSnapBefore[winner[0]] || snapshotPlayerStats(db, winner[0]);
 
   if(winner){
     const winnerPlayer = db.players.find(x=>x.id===winner[0]);
     const winnerName = winnerPlayer ? winnerPlayer.name : winner[0];
     
-    if(prevMotmId !== winner[0]){
-      if(prevMotmId) {
-          const oldWinner = db.players.find(x=>x.id===prevMotmId);
+    if(prevMotmName !== winnerName){
+      if(prevMotmName) {
+          const oldWinner = db.players.find(x=>x.name===prevMotmName);
           if(oldWinner) {
               oldWinner.stats.xp = Math.max(0, (oldWinner.stats.xp || 0) - 30);
-              oldWinner.marketValue = Math.max(100000, (oldWinner.marketValue || 1000000) - 200000);
+              oldWinner.marketValue = Math.max(100000, (oldWinner.marketValue || 500000) - 200000);
               playersToSave.push(oldWinner);
           }
       }
-      match.motmId = winner[0]; match.motm = winnerName; awardXP(db,winner[0],30); awardMotmValue(db,winner[0]);
+      match.motm = winnerName; awardXP(db,winner[0],30); awardMotmValue(db,winner[0]);
       if(winnerPlayer) playersToSave.push(winnerPlayer);
       addNews(`🏅 ${winnerName} won Man of the Match!`,'⭐');
     }
   }
-  recordMatchDelta(db, t, match.ts, Object.keys(motmSnapBefore), motmSnapBefore);
   
   await saveSingleTournament(t);
   for(let p of playersToSave) { await saveSinglePlayer(p); }
@@ -2144,7 +1675,36 @@ async function submitMotmVote(){
 // ============================================================
 // END CUP
 // ============================================================
-function confirmEnd(){document.getElementById('conf-ov').classList.add('active')}
+function confirmEnd(){
+  const db=getDB();
+  const t=db.tournaments[activeTournIdx];
+  if(!t)return;
+  if(t.matches.length===0){snack('⚠️ Record at least one match first!');return;}
+  if(t.phase==='elimination'&&t.bracket&&t.bracket.length>0){
+    const finalMatch=t.bracket[t.bracket.length-1][0];
+    if(!finalMatch.winner){snack('⚠️ The Final Match is not played yet!');return;}
+  }
+
+  const goalCounts={};
+  t.matches.forEach(m=>{if(m.events&&m.events.goals){Object.keys(m.events.goals).forEach(pid=>{goalCounts[pid]=(goalCounts[pid]||0)+m.events.goals[pid];});}});
+  let topScorerIds=[];let maxGoals=0;
+  Object.keys(goalCounts).forEach(pid=>{if(goalCounts[pid]>maxGoals){maxGoals=goalCounts[pid];topScorerIds=[pid];}else if(goalCounts[pid]===maxGoals&&maxGoals>0){topScorerIds.push(pid);}});
+
+  let winner;
+  if(t.phase==='elimination'&&t.bracket&&t.bracket.length>0){
+    const finalMatch=t.bracket[t.bracket.length-1][0];
+    winner=t.standings.find(s=>s.id===finalMatch.winner);
+  } else {
+    winner=sortedStandings(t)[0];
+  }
+  const bootNames=topScorerIds.map(pid=>{const p=db.players.find(x=>x.id===pid);return p?p.name:'';}).filter(Boolean);
+
+  const txt=document.querySelector('#conf-ov .conf-txt');
+  if(txt){
+    txt.innerHTML=`🏆 Champion: <strong style="color:var(--gold)">${winner?winner.name:'—'}</strong>${bootNames.length?`<br>🥾 Golden Boot: <strong style="color:var(--gold)">${bootNames.join(' & ')}</strong> (${maxGoals} goals)`:''}<br><br>Points, goals & XP are permanently saved. The cup is locked forever.`;
+  }
+  document.getElementById('conf-ov').classList.add('active');
+}
 // ============================================================
 // END CUP (FIXED TRUE CHAMPION LOGIC)
 // ============================================================
@@ -2188,53 +1748,14 @@ async function endCup(){
   });
   
   const winPids=t.type==='1v1'?[winner.id]:[winner.proId,winner.youthId].filter(Boolean);
-  winPids.forEach(pid=>{
-    const p=db.players.find(x=>x.id===pid);if(!p)return;
-    p.stats.trophies=(p.stats.trophies||0)+1;
-    p.stats.trophyTournaments = p.stats.trophyTournaments || [];
-    p.stats.trophyTournaments.push(t.name); // بند 38: قائمة أسماء البطولات اللي فاز بيها
-    awardXP(db,pid,200);p.marketValue=(p.marketValue||1000000)+500000;
-  });
+  winPids.forEach(pid=>{const p=db.players.find(x=>x.id===pid);if(!p)return;p.stats.trophies=(p.stats.trophies||0)+1;awardXP(db,pid,200);p.marketValue=(p.marketValue||500000)+500000;});
   
   let bootNames=[];
-  topScorerIds.forEach(pid=>{const p=db.players.find(x=>x.id===pid);if(p){p.stats.goldenBoots=(p.stats.goldenBoots||0)+1;awardXP(db,pid,100);p.marketValue=(p.marketValue||1000000)+300000;bootNames.push(p.name);}});
-
-  // بند 26: لقب Golden Player — متوسط تقييم داخل هذه البطولة تحديدًا، بحد أدنى للأصوات (بند 14)
-  const MIN_VOTES_FOR_GOLDEN_PLAYER = 3;
-  const allTournamentPids = [];
-  t.standings.forEach(entry=>{
-    if(t.type==='1v1') allTournamentPids.push(entry.id);
-    else { if(entry.proId) allTournamentPids.push(entry.proId); if(entry.youthId) allTournamentPids.push(entry.youthId); }
-  });
-  let bestAvg=-1, goldenPlayerIds=[];
-  allTournamentPids.forEach(pid=>{
-    const r = getPlayerAvgRatingInTournament(pid, t);
-    if(r && r.count>=MIN_VOTES_FOR_GOLDEN_PLAYER){
-      if(r.avg>bestAvg){ bestAvg=r.avg; goldenPlayerIds=[pid]; }
-      else if(r.avg===bestAvg){ goldenPlayerIds.push(pid); } // بند 15: تعادل → الاتنين ياخدوا اللقب
-    }
-  });
-  let goldenPlayerNames=[];
-  goldenPlayerIds.forEach(pid=>{
-    const p=db.players.find(x=>x.id===pid);
-    if(p){
-      p.stats.goldenPlayerCount=(p.stats.goldenPlayerCount||0)+1;
-      p.stats.goldenPlayerTournaments = p.stats.goldenPlayerTournaments || [];
-      p.stats.goldenPlayerTournaments.push(t.name); // بند 18: يتسجل كل مرة لوحدها (مش مرة واحدة مدى الحياة)
-      awardXP(db,pid,150); // بند 30
-      p.marketValue=(p.marketValue||1000000)+400000; // بند 29
-      goldenPlayerNames.push(p.name);
-    }
-  });
-  // بند 17: تخزين ملخص النتائج على البطولة نفسها عشان شاشة الهيستوري الجديدة تعرضها من غير إعادة حساب
-  t.winnerName = winner.name;
-  t.goldenBootNames = bootNames;
-  t.goldenPlayerNames = goldenPlayerNames;
+  topScorerIds.forEach(pid=>{const p=db.players.find(x=>x.id===pid);if(p){p.stats.goldenBoots=(p.stats.goldenBoots||0)+1;awardXP(db,pid,100);p.marketValue=(p.marketValue||500000)+300000;bootNames.push(p.name);}});
   
   t.status='ended';
   addNews(`🏆 "${t.name}" ended! Winner: ${winner.name}! 🎉`,'🏆');
   if(bootNames.length>0)addNews(`🥾 GOLDEN BOOT: ${bootNames.join(' & ')} (${maxGoals} Goals)`,'🥾');
-  if(goldenPlayerNames.length>0)addNews(`⭐ GOLDEN PLAYER: ${goldenPlayerNames.join(' & ')} (Avg Rating: ${bestAvg}/5)`,'⭐');
   
   // رفع البيانات للسيرفر بأمان تام
   await saveSingleTournament(t);
@@ -2254,11 +1775,208 @@ async function endCup(){
 }
 
 // ============================================================
+// ARCHIVE TOURNAMENT (ADMIN ONLY)
+// ============================================================
+async function toggleArchiveTournament(){
+  if(currentUser?.type!=='admin')return;
+  const db=getDB();
+  const t=db.tournaments[activeTournIdx];
+  if(!t)return;
+  t.archivedAt=t.archivedAt?null:Date.now();
+  await saveSingleTournament(t);
+  localStorage.setItem(DB_KEY, JSON.stringify(db));
+  snack(t.archivedAt?`📦 "${t.name}" archived.`:`✅ "${t.name}" restored from archive.`);
+  renderTournamentScreen();
+}
+
+// ============================================================
 // DELETE TOURNAMENT (ADMIN ONLY)
 // ============================================================
 async function deleteTournament(){
   if(currentUser?.type !== 'admin') return;
-  await deleteLiveTournament();
+  const db = getDB();
+  const t = db.tournaments[activeTournIdx];
+  if(!t) return;
+  
+  const confirmText = prompt(`⚠️ DANGER: Type "DELETE" to permanently remove "${t.name}".\nThis will ALSO reverse every goal, card, XP, market-value, trophy and golden-boot change it caused for every player involved. This cannot be undone!`);
+  if(confirmText !== "DELETE") { snack("❌ Deletion canceled."); return; }
+
+  try {
+      // 1. Reverse every match's effect on player stats (goals, cards, XP, market value)
+      (t.matches||[]).forEach(m=>revertMatchEffects(db,t,m));
+      // 2. Reverse trophy / golden-boot / career-points effects if the cup had already ended
+      revertTournamentEndEffects(db,t);
+
+      // 3. Persist every affected player back to the cloud
+      const affected=new Set();
+      (t.participants||[]).forEach(p=>{
+        if(t.type==='1v1') affected.add(p);
+        else { if(p.proId)affected.add(p.proId); if(p.youthId)affected.add(p.youthId); }
+      });
+      for(const pid of affected){
+        const p=db.players.find(x=>x.id===pid);
+        if(p) await saveSinglePlayer(p);
+      }
+
+      // 4. Delete from Supabase Server
+      await supabaseClient.from('tournaments').delete().eq('id', t.id);
+      
+      // 5. Delete from Local UI
+      db.tournaments.splice(activeTournIdx, 1);
+      localStorage.setItem(DB_KEY, JSON.stringify(db));
+      
+      snack(`🗑️ "${t.name}" deleted — all player progress from it has been reversed.`);
+      backToApp(); // Return to main arena
+  } catch(err) {
+      console.error(err);
+      snack("❌ Error deleting tournament from server.");
+  }
+}
+
+// ============================================================
+// REVERSE ENGINE — undoes everything a tournament's matches/end
+// awarded to players, so DELETE truly wipes all related progress.
+// (Note: ELO rating is a running relative score shared across every
+// tournament a player has ever played — it is NOT reversible in
+// isolation, so ELO is intentionally left untouched here.)
+// ============================================================
+function reversePlayerMarketValue(db,pid,matchData){
+  const p=db.players.find(x=>x.id===pid);if(!p)return;
+  let val=p.marketValue||500000;
+  if(matchData.result==='win')val-=100000;
+  else if(matchData.result==='draw')val-=25000;
+  else if(matchData.result==='loss')val+=50000;
+  if(matchData.goals>0)val-=(matchData.goals*50000);
+  if(matchData.card==='yellow')val+=50000;
+  else if(matchData.card==='red')val+=150000;
+  if(val<100000)val=100000; // safety floor — same as the forward engine
+  p.marketValue=val;
+}
+function revertMatchEffects(db,t,m){
+  const events=m.events||{goals:{},cards:{}};
+  const tA=t.standings.find(s=>s.id===m.aId);
+  const tB=t.standings.find(s=>s.id===m.bId);
+  const goalsA=m.goalsA, goalsB=m.goalsB;
+
+  Object.keys(events.goals||{}).forEach(pid=>{
+    const g=events.goals[pid];
+    const card=(events.cards||{})[pid];
+    const isTeamA=t.type==='1v1'?pid===m.aId:(tA&&(pid===tA.proId||pid===tA.youthId));
+    const isTeamB=t.type==='1v1'?pid===m.bId:(tB&&(pid===tB.proId||pid===tB.youthId));
+    let matchResult='draw';
+    if(isTeamA&&goalsA>goalsB)matchResult='win';else if(isTeamA&&goalsA<goalsB)matchResult='loss';
+    else if(isTeamB&&goalsB>goalsA)matchResult='win';else if(isTeamB&&goalsB<goalsA)matchResult='loss';
+
+    reversePlayerMarketValue(db,pid,{result:matchResult,goals:g,card:card});
+    if(g>0&&card!=='red'){
+      const p=db.players.find(x=>x.id===pid);
+      if(p){p.stats.goals=Math.max(0,(p.stats.goals||0)-g);awardXP(db,pid,-(g*10));}
+    }
+  });
+
+  const teamA_Ids=t.type==='1v1'?[m.aId]:(tA?[tA.proId,tA.youthId]:[]);
+  const teamB_Ids=t.type==='1v1'?[m.bId]:(tB?[tB.proId,tB.youthId]:[]);
+  teamA_Ids.forEach(id=>awardXP(db,id,-(goalsA>goalsB?30:(goalsA===goalsB?10:5))));
+  teamB_Ids.forEach(id=>awardXP(db,id,-(goalsB>goalsA?30:(goalsA===goalsB?10:5))));
+
+  Object.keys(events.cards||{}).forEach(pid=>{
+    const cardType=events.cards[pid];
+    const p=db.players.find(x=>x.id===pid);if(!p)return;
+    if(cardType==='yellow')p.stats.yellow=Math.max(0,(p.stats.yellow||0)-1);
+    else if(cardType==='red')p.stats.red=Math.max(0,(p.stats.red||0)-1);
+    // Suspension flags & the team's -4 PTS penalty are left untouched — the
+    // tournament (and its standings) is being deleted anyway, and a player's
+    // suspended/active status is left for the admin to review manually.
+  });
+}
+function revertTournamentEndEffects(db,t){
+  if(t.status!=='ended')return;
+  const goalCounts={};
+  (t.matches||[]).forEach(m=>{if(m.events&&m.events.goals){Object.keys(m.events.goals).forEach(pid=>{goalCounts[pid]=(goalCounts[pid]||0)+m.events.goals[pid];});}});
+  let topScorerIds=[];let maxGoals=0;
+  Object.keys(goalCounts).forEach(pid=>{if(goalCounts[pid]>maxGoals){maxGoals=goalCounts[pid];topScorerIds=[pid];}else if(goalCounts[pid]===maxGoals&&maxGoals>0){topScorerIds.push(pid);}});
+
+  let winner=null;
+  if(t.phase==='elimination'&&t.bracket&&t.bracket.length>0){
+    const finalMatch=t.bracket[t.bracket.length-1][0];
+    if(finalMatch&&finalMatch.winner)winner=t.standings.find(s=>s.id===finalMatch.winner);
+  } else {
+    winner=sortedStandings(t)[0]||null;
+  }
+
+  (t.standings||[]).forEach(entry=>{
+    const pids=t.type==='1v1'?[entry.id]:[entry.proId,entry.youthId].filter(Boolean);
+    pids.forEach(pid=>{const p=db.players.find(x=>x.id===pid);if(!p)return;p.stats.points=(p.stats.points||0)-entry.PTS;});
+  });
+
+  if(winner){
+    const winPids=t.type==='1v1'?[winner.id]:[winner.proId,winner.youthId].filter(Boolean);
+    winPids.forEach(pid=>{const p=db.players.find(x=>x.id===pid);if(!p)return;p.stats.trophies=Math.max(0,(p.stats.trophies||0)-1);awardXP(db,pid,-200);p.marketValue=Math.max(100000,(p.marketValue||500000)-500000);});
+  }
+  topScorerIds.forEach(pid=>{const p=db.players.find(x=>x.id===pid);if(p){p.stats.goldenBoots=Math.max(0,(p.stats.goldenBoots||0)-1);awardXP(db,pid,-100);p.marketValue=Math.max(100000,(p.marketValue||500000)-300000);}});
+}
+
+// ============================================================
+// EDIT LAST MATCH (ADMIN ONLY) — undo the most recent result so
+// it can be re-entered correctly. Not available for knockout ties
+// (bracket progression makes a safe undo far riskier there).
+// ============================================================
+async function editLastMatch(){
+  if(currentUser?.type!=='admin')return;
+  const db=getDB();
+  const t=db.tournaments[activeTournIdx];
+  if(!t)return;
+  if(!t.matches||t.matches.length===0){snack('⚠️ No matches to edit yet.');return;}
+  if(t.phase==='elimination'){snack('⚠️ Knockout matches can\'t be edited this way — delete the tournament if it truly needs a reset.');return;}
+
+  const m=t.matches[t.matches.length-1];
+  if(!confirm(`Undo the last result?\n\n${m.teamA} ${m.goalsA} - ${m.goalsB} ${m.teamB}\n\nAll goals/cards/XP/value it caused will be reversed, and you'll be able to re-enter it correctly.`))return;
+
+  // 1. Reverse the global player-stat effects of this match
+  revertMatchEffects(db,t,m);
+
+  // 2. Reverse this match's effect on the tournament standings
+  const tA=t.standings.find(s=>s.id===m.aId);
+  const tB=t.standings.find(s=>s.id===m.bId);
+  if(tA&&tB){
+    tA.PL--;tB.PL--;
+    tA.GF-=m.goalsA;tA.GA-=m.goalsB;tB.GF-=m.goalsB;tB.GA-=m.goalsA;
+    tA.GD=tA.GF-tA.GA;tB.GD=tB.GF-tB.GA;
+    if(m.goalsA>m.goalsB){tA.W--;tA.PTS-=3;tB.L--;}
+    else if(m.goalsB>m.goalsA){tB.W--;tB.PTS-=3;tA.L--;}
+    else{tA.D--;tA.PTS--;tB.D--;tB.PTS--;}
+
+    Object.keys((m.events&&m.events.cards)||{}).forEach(pid=>{
+      if(m.events.cards[pid]==='red'){
+        const entry=(t.type==='1v1')?t.standings.find(s=>s.id===pid):t.standings.find(s=>s.proId===pid||s.youthId===pid);
+        if(entry&&entry.reds&&entry.reds[pid]){
+          const wasOverLimit=entry.reds[pid]>3;
+          entry.reds[pid]--;
+          if(wasOverLimit&&t.format==='league')entry.PTS+=4;
+        }
+      }
+    });
+  }
+
+  // 3. Re-open the schedule slot so it shows up as "next match" again
+  if(t.schedule){
+    const schedIdx=t.schedule.map((s,i)=>({s,i})).reverse().find(({s})=>s.played&&((s.aId===m.aId&&s.bId===m.bId)||(s.aId===m.bId&&s.bId===m.aId)))?.i;
+    if(schedIdx!==undefined)t.schedule[schedIdx].played=false;
+  }
+
+  // 4. Remove the match record
+  t.matches.pop();
+
+  // 5. Persist
+  await saveSingleTournament(t);
+  const affected=new Set();
+  if(t.type==='1v1'){affected.add(m.aId);affected.add(m.bId);}
+  else{if(tA){affected.add(tA.proId);affected.add(tA.youthId);}if(tB){affected.add(tB.proId);affected.add(tB.youthId);}}
+  for(const pid of affected){const p=db.players.find(x=>x.id===pid);if(p)await saveSinglePlayer(p);}
+  localStorage.setItem(DB_KEY, JSON.stringify(db));
+
+  snack('↩️ Last match undone — re-enter the correct result whenever ready.');
+  renderTournamentScreen();
 }
 
 function showWinnerCelebration(winner,t,db){
@@ -2370,27 +2088,17 @@ function getPlayerForm(pid,db){
   }).join('');
 }
 
-// بند 26: متوسط تقييم اللاعب داخل بطولة واحدة بعينها (مش متوسط تراكمي شامل) — لحساب Golden Player
-function getPlayerAvgRatingInTournament(pid, t){
-  let total=0,count=0;
-  (t.matches||[]).forEach(m=>{
-    if(m.avgRatings && m.avgRatings[pid]!==undefined){ total+=m.avgRatings[pid]; count++; }
-  });
-  if(count===0) return null;
-  return {avg: Math.round(total/count*10)/10, count};
-}
-
 function getPlayerAvgRating(pid,db){
   let total=0,count=0;
   db.tournaments.forEach(t=>{
     (t.matches||[]).forEach(m=>{
-      if(m.avgRatings && m.avgRatings[pid]!==undefined){
+      if(m.avgRatings&&m.avgRatings[pid]){
         total+=m.avgRatings[pid];count++;
       }
     });
   });
   if(!count)return null;
-  return {avg: Math.round(total/count*10)/10, count};
+  return Math.round(total/count*10)/10;
 }
 
 // ============================================================
@@ -2415,7 +2123,7 @@ async function approvePlayer(idx){
   const newPlayer = {
       player_id: id, name: req.name, pin: req.pin, photo: req.photo||'', 
       tier: 'youth', stars: 0, stats: {xp:0,points:0,trophies:0,goals:0}, 
-      market_value: 1000000, status: 'active'
+      market_value: 500000, status: 'active'
   };
 
   try {
@@ -2427,7 +2135,7 @@ async function approvePlayer(idx){
       await supabaseClient.from('pending_requests').delete().eq('username', id);
 
       // 3. Update Local UI safely
-      db.players.push({id:id, name:req.name, pin:req.pin, photo:req.photo||'', tier:'youth', stars:0, stats:{xp:0,points:0,trophies:0,goals:0}, marketValue:1000000, status: 'active'});
+      db.players.push({id:id, name:req.name, pin:req.pin, photo:req.photo||'', tier:'youth', stars:0, stats:{xp:0,points:0,trophies:0,goals:0}, marketValue:500000, status: 'active'});
       db.pending.splice(idx,1);
       
       addNews(`✅ ${req.name} joined! Username: ${id}`,'👋');
@@ -2467,7 +2175,9 @@ async function toggleTier(playerIdx){
   const db=getDB();const p=db.players[playerIdx];p.tier=p.tier==='pro'?'youth':'pro';
   await saveSinglePlayer(p); // الحفظ الذكي
   localStorage.setItem(DB_KEY, JSON.stringify(db));
-  snack(`${p.name} is now ${p.tier==='pro'?'⭐ PRO':'🌱 YOUTH'}`);renderLocker();
+  snack(`${p.name} is now ${p.tier==='pro'?'⭐ PRO':'🌱 YOUTH'}`);
+  closeModal('modal-admin-player');
+  renderLocker();
 }
 
 function openAdminManagePlayer(idx){
@@ -2498,6 +2208,11 @@ function openAdminManagePlayer(idx){
       <input type="file" id="manage-photo-file" accept="image/*" style="display:none" onchange="handlePhoto(this,'manage-photo-prev','manage-photo-data')">
       <input type="hidden" id="manage-photo-data">
       <button class="btn btn-green" onclick="adminUpdatePhoto(${idx})">UPDATE PHOTO</button>
+    </div>
+    <div class="settings-card">
+      <div class="settings-title">🔄 Player Tier</div>
+      <div style="font-size:11px; color:var(--sub); margin-bottom:8px;">Current: ${p.tier==='pro'?'⭐ PRO':'🌱 YOUTH'}</div>
+      <button class="btn btn-blue" onclick="toggleTier(${idx})">SWITCH TO ${p.tier==='pro'?'🌱 YOUTH':'⭐ PRO'}</button>
     </div>
     <div class="settings-card" style="border-color:rgba(255,71,87,0.3)">
       <div class="settings-title" style="color:var(--red)">📦 Archive Player</div>
@@ -2555,9 +2270,7 @@ async function adminUpdatePin(idx){
 async function adminUpdatePhoto(idx){
   const photo=document.getElementById('manage-photo-data').value;
   if(!photo){snack('Select a photo first');return}
-  const db=getDB();if(!db.players[idx])return;
-  const photoUrl = await uploadPhotoToStorage(photo, db.players[idx].id);
-  db.players[idx].photo=photoUrl;
+  const db=getDB();if(!db.players[idx])return;db.players[idx].photo=photo;
   await saveSinglePlayer(db.players[idx]); // الحفظ الذكي
   localStorage.setItem(DB_KEY, JSON.stringify(db));
   snack('✅ Photo updated');closeModal('modal-admin-player');renderLocker();
@@ -2647,15 +2360,6 @@ function openProfile(idx,canEdit=false){
     </div>
 
     <div class="stat-grid" style="margin-top:8px; grid-template-columns: 1fr 1fr;">
-      <div class="stat-cell" style="background:rgba(124,92,255,0.05); border-color:rgba(124,92,255,0.2)">
-        <div class="stat-val" style="color:var(--purple)">${avgRating?avgRating.avg:'—'}${avgRating?'⭐':''}</div><div class="stat-lbl">Avg Rating${avgRating?` (${avgRating.count})`:''}</div>
-      </div>
-      <div class="stat-cell" style="background:rgba(240,180,41,0.05); border-color:rgba(240,180,41,0.2)">
-        <div class="stat-val" style="color:var(--gold)">${s.goldenPlayerCount||0}</div><div class="stat-lbl">Golden Player ⭐</div>
-      </div>
-    </div>
-
-    <div class="stat-grid" style="margin-top:8px; grid-template-columns: 1fr 1fr;">
       <div class="stat-cell" style="background:rgba(240,180,41,0.05); border-color:rgba(240,180,41,0.2)">
         <div class="stat-val" style="color:var(--gold)">${s.yellow||0}</div><div class="stat-lbl">Yellows 🟨</div>
       </div>
@@ -2664,12 +2368,6 @@ function openProfile(idx,canEdit=false){
       </div>
     </div>
 
-    ${(s.trophyTournaments&&s.trophyTournaments.length>0)?`
-    <div style="margin-top:14px;padding:14px;background:var(--card);border-radius:12px;border:1px solid var(--border)">
-      <div style="font-size:10px;font-weight:700;letter-spacing:1.5px;color:var(--gold);margin-bottom:8px">🏆 TOURNAMENTS WON</div>
-      ${s.trophyTournaments.map(n=>`<div style="font-size:13px;font-weight:600;padding:4px 0;border-bottom:1px solid var(--border)">${n}</div>`).join('')}
-    </div>`:''}
-
     <div class="graph-card">
       <div class="graph-title">📊 Goals History (Last 5)</div>
       ${graphHtml}
@@ -2677,7 +2375,7 @@ function openProfile(idx,canEdit=false){
 
     <div style="margin-top:14px;padding:14px;background:var(--card);border-radius:12px;border:1px solid var(--border)">
       <div style="font-size:10px;font-weight:700;letter-spacing:1.5px;color:var(--sub);margin-bottom:8px">MARKET VALUE</div>
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:28px;color:var(--gold)">€${((p.marketValue||1000000)/1000000).toFixed(2)}M</div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:28px;color:var(--gold)">€${((p.marketValue||500000)/1000000).toFixed(2)}M</div>
     </div>
     ${canEdit?`<button class="btn btn-ghost" style="margin-top:14px" onclick="openEditSelfProfile(${idx})">✏️ Edit My Profile</button>`:''}`;
     
@@ -2728,9 +2426,7 @@ function openEditSelfProfile(idx){
 async function selfUpdatePhoto(idx){
   const photo=document.getElementById('self-photo-data').value;
   if(!photo){snack('Select a photo');return}
-  const db=getDB();
-  const photoUrl = await uploadPhotoToStorage(photo, db.players[idx].id);
-  db.players[idx].photo=photoUrl;
+  const db=getDB();db.players[idx].photo=photo;
   await saveSinglePlayer(db.players[idx]); // الحفظ الذكي
   localStorage.setItem(DB_KEY, JSON.stringify(db));
   renderUserBadge();snack('✅ Photo updated');closeModal('modal-edit-profile');renderLocker();
@@ -2763,21 +2459,22 @@ async function selfUpdatePin(idx){
 // ============================================================
 function renderHistory(){
   const db=getDB();const el=document.getElementById('tab-history');
-  const endedTournaments = db.tournaments.filter(t=>t.status==='ended');
-  if(endedTournaments.length===0){el.innerHTML=`<div class="empty-state"><div class="empty-ico">🏛️</div><div class="empty-txt">No tournament history yet.<br>Complete a tournament to fill it.</div></div>`;return;}
-  el.innerHTML=`<div class="sec-hdr"><div class="sec-ttl">🏛️ Tournament History</div></div>
-    <div class="t-list">
-    ${endedTournaments.map((t)=>{
-      const i=db.tournaments.indexOf(t);
-      const fmtLabel = t.format==='league' ? '🏅 League' : (t.format==='groups' ? '🧩 Group Stage' : '🌳 Elimination');
-      return`<div class="t-card" onclick="openTournament(${i})">
-        <div class="t-card-top"><span class="ended-badge">ENDED</span></div>
-        <div class="t-name">${t.name}</div>
-        <div class="t-meta">${t.type.toUpperCase()} · ${fmtLabel}</div>
-        <div style="margin-top:10px;font-size:13px;line-height:1.9">
-          <div>👑 <strong style="color:var(--gold)">${t.winnerName||'—'}</strong></div>
-          ${t.goldenBootNames&&t.goldenBootNames.length>0?`<div>🥾 Golden Boot: <strong>${t.goldenBootNames.join(' & ')}</strong></div>`:''}
-          ${t.goldenPlayerNames&&t.goldenPlayerNames.length>0?`<div>⭐ Golden Player: <strong style="color:var(--purple)">${t.goldenPlayerNames.join(' & ')}</strong></div>`:''}
+  const sorted=[...db.players].sort((a,b)=>{const eloA=a.stats?.elo||1000,eloB=b.stats?.elo||1000;if(eloB!==eloA)return eloB-eloA;return(b.stats?.points||0)-(a.stats?.points||0);});
+  if(sorted.length===0){el.innerHTML=`<div class="empty-state"><div class="empty-ico">🏛️</div><div class="empty-txt">Hall of Fame is empty.<br>Complete a tournament to fill it.</div></div>`;return;}
+  el.innerHTML=`<div class="sec-hdr"><div class="sec-ttl">👑 Hall of Fame (Global Rank)</div></div><div class="hof-list">
+    ${sorted.map((p,i)=>{
+      const s=p.stats||{};const xp=s.xp||0;const lvl=getLevelFromXP(xp);const lvlTitle=getLevelTitle(lvl);const elo=s.elo||1000;const pIdx=db.players.indexOf(p);
+      return`<div class="hof-item ${i===0?'r1':''}" onclick="openProfile(${pIdx},false)">
+        <div class="rank-n">${i===0?'👑':i+1}</div>${avHTML(p,46)}
+        <div style="flex:1;min-width:0">
+          <div style="font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">${p.name}<span class="lvl-badge" style="font-size:9px">LVL ${lvl}</span></div>
+          <div style="font-size:11px;color:var(--sub);margin-top:2px;font-weight:600">${lvlTitle}</div>
+          <div class="hof-stats">
+            <div class="sp">🌐&thinsp;<strong style="color:var(--purple)">${elo} ELO</strong></div>
+            <div class="sp">🏆&thinsp;<strong>${s.trophies||0}</strong></div>
+            <div class="sp">🥾&thinsp;<strong style="color:var(--gold)">${s.goldenBoots||0}</strong></div>
+            <div class="sp">⚽&thinsp;<strong>${s.goals||0}</strong></div>
+          </div>
         </div>
       </div>`;
     }).join('')}
@@ -2794,15 +2491,17 @@ function renderMarket(){
     el.innerHTML=`<div class="empty-state"><div class="empty-ico">💸</div><div class="empty-txt">No players in the market yet.</div></div>`;
     return;
   }
-  const sorted=[...db.players].sort((a,b)=>(b.marketValue||1000000)-(a.marketValue||1000000));
+  const sorted=[...db.players].sort((a,b)=>(b.marketValue||500000)-(a.marketValue||500000));
+  const totalValue=sorted.reduce((sum,p)=>sum+(p.marketValue||500000),0);
+  const totalStr=totalValue>=1000000?`€${(totalValue/1000000).toFixed(2)}M`:`€${(totalValue/1000).toFixed(0)}K`;
   el.innerHTML=`
     <div class="budget-bar">
-      <div><div style="font-size:10px;font-weight:700;letter-spacing:1.5px;color:var(--sub);margin-bottom:3px">CLUB BUDGET</div><div class="budget-val">€100.00M</div></div>
-      <div style="font-size:12px;color:var(--sub);font-weight:600">Virtual Currency</div>
+      <div><div style="font-size:10px;font-weight:700;letter-spacing:1.5px;color:var(--sub);margin-bottom:3px">TOTAL SQUAD VALUE</div><div class="budget-val">${totalStr}</div></div>
+      <div style="font-size:12px;color:var(--sub);font-weight:600">${sorted.length} Player${sorted.length===1?'':'s'}</div>
     </div>
     <div style="padding:6px 14px">
       ${sorted.map((p,i)=>{
-        const val=p.marketValue||1000000;
+        const val=p.marketValue||500000;
         const valStr=val>=1000000?`€${(val/1000000).toFixed(2)}M`:`€${(val/1000).toFixed(0)}K`;
         const xp=p.stats?.xp||0;const lvl=getLevelFromXP(xp);
         return`<div class="market-card">
@@ -2814,16 +2513,17 @@ function renderMarket(){
           <div>
             <div class="market-val">${valStr}</div>
             <div class="market-val-lbl">VALUE</div>
-            ${isAdmin?`<button class="bid-btn" style="margin-top:6px" onclick="adjustValue(${i})">ADJUST</button>`:`<button class="bid-btn" style="margin-top:6px;opacity:0.5;cursor:default">BID</button>`}
+            ${isAdmin?`<button class="bid-btn" style="margin-top:6px" onclick="adjustValue('${p.id}')">ADJUST</button>`:`<button class="bid-btn" style="margin-top:6px;opacity:0.5;cursor:default">BID</button>`}
           </div>
         </div>`;
       }).join('')}
     </div>`;
 }
 
-async function adjustValue(idx){
-  const db=getDB();const p=db.players[idx];
-  const cur=((p.marketValue||1000000)/1000000).toFixed(2);
+async function adjustValue(pid){
+  const db=getDB();const p=db.players.find(x=>x.id===pid);
+  if(!p)return;
+  const cur=((p.marketValue||500000)/1000000).toFixed(2);
   const input=prompt(`Set new market value for ${p.name} (in millions €):`,cur);
   if(!input||isNaN(parseFloat(input)))return;
   p.marketValue=Math.round(parseFloat(input)*1000000);
@@ -2864,64 +2564,43 @@ function showGoalAnimation(scoreText){
 async function refreshData() {
     snack('🔄 Syncing live data...'); 
     try {
-        const [pRes, tActiveRes, tEndedRes, tArchivedRes, nRes, pendRes, admRes] = await Promise.all([
+        const [pRes, tRes, nRes, pendRes, admRes] = await Promise.all([
             supabaseClient.from('players').select('*'),
-            supabaseClient.from('tournaments').select('*').eq('status','active'),
-            // بند 15: البطولات المنتهية تُحمَّل خفيفة (بدون matches/standings/bracket/schedule الثقيلة) أولًا
-            supabaseClient.from('tournaments').select('id,name,format,type,status,participants').eq('status','ended'),
-            // البطولات المؤرشفة (سلة المحذوفات) تُحمَّل كاملة (بند 19، القسم 2-ج) عشان الاستعادة الكاملة تشتغل
-            supabaseClient.from('tournaments').select('*').eq('status','archived'),
+            supabaseClient.from('tournaments').select('*'), 
             supabaseClient.from('news').select('*').order('ts', { ascending: false }).limit(20),
             supabaseClient.from('pending_requests').select('*'),
             supabaseClient.from('admin_settings').select('value').eq('key', 'codes').single()
         ]);
 
         if(pRes.error) console.error("Players Fetch Error:", pRes.error);
-        if(tActiveRes.error) console.error("Active Tournaments Fetch Error:", tActiveRes.error);
-        if(tEndedRes.error) console.error("Ended Tournaments Fetch Error:", tEndedRes.error);
-        if(tArchivedRes.error) console.error("Archived Tournaments Fetch Error:", tArchivedRes.error);
+        if(tRes.error) console.error("Tournaments Fetch Error:", tRes.error);
 
         if(pRes.data) cloudDB.players = pRes.data.map(p => ({
             id: p.player_id, name: p.name, pin: p.pin, photo: p.photo,
-            tier: p.tier, stars: p.stars, stats: p.stats || {xp:0,points:0,trophies:0,goals:0,elo:1000,badges:[],reds:0,yellow:0,red:0,motm:0,goldenBoots:0}, 
-            marketValue: p.market_value || 1000000,
+            tier: p.tier, stars: p.stars, stats: p.stats || {xp:0,points:0,trophies:0,goals:0}, 
+            marketValue: p.market_value || 500000,
             status: p.status || 'active'
         }));
 
-        const activeTournaments = (tActiveRes.data || []).map(t => ({
-            ...t,
-            matches: t.matches || [],
-            standings: t.standings || [],
-            participants: t.participants || [],
-            schedule: t.schedule || null,
-            bracket: t.bracket || null,
-            deltaLog: t.delta_log || [],
-            guestAssistEnabled: t.guest_assist_enabled || false,
-            loaded: true
-        }));
-        // بند 15: البطولات المنتهية تُحمَّل خفيفة (loaded:false) — تفاصيلها الكاملة تُجلب عند الفتح فقط
-        const endedTournamentsLight = (tEndedRes.data || []).map(t => ({
-            id: t.id, name: t.name, format: t.format, type: t.type, status: t.status,
-            participants: t.participants || [],
-            matches: [], standings: [], schedule: null, bracket: null,
-            loaded: false
-        }));
-        const archivedTournaments = (tArchivedRes.data || []).map(t => ({
-            ...t,
-            matches: t.matches || [], standings: t.standings || [], participants: t.participants || [],
-            schedule: t.schedule || null, bracket: t.bracket || null, deltaLog: t.delta_log || [],
-            archivedAt: t.archived_at || null, loaded: true
-        }));
-        cloudDB.tournaments = [...activeTournaments, ...endedTournamentsLight, ...archivedTournaments].sort((a,b) => b.id - a.id);
+        if(tRes.data) {
+            cloudDB.tournaments = tRes.data.map(t => ({
+                ...t,
+                matches: t.matches || [],
+                standings: t.standings || [],
+                participants: t.participants || [],
+                schedule: t.schedule || null,
+                bracket: t.bracket || null,
+                groups: t.groups || null,
+                autoQualify: t.auto_qualify || false,
+                archivedAt: t.archived_at || null
+            })).sort((a,b) => b.id - a.id); 
+        }
 
         if(nRes.data) cloudDB.news = nRes.data;
         if(pendRes.data) cloudDB.pending = pendRes.data.map(req => ({
             name: req.name, username: req.username, pin: req.pin, photo: req.photo, ts: req.ts
         }));
         if(admRes.data && admRes.data.value) cloudDB.adminCodes = admRes.data.value;
-
-        // بند: فحص كسول للأرشيف المنتهية مدته (48 ساعة) في كل مرة يتحمّل فيها التطبيق
-        await cleanupExpiredArchive();
 
         if(currentUser) renderUserBadge();
         const activeTab = document.querySelector('.nav-item.active')?.dataset.tab || 'arena';
@@ -2931,30 +2610,8 @@ async function refreshData() {
         snack('✅ Data is up to date!');
     } catch(e) { 
         console.error("Refresh Error", e); 
-        snackWithRetry('❌ Sync failed. Check internet.', () => refreshData());
+        snack('❌ Sync failed. Check internet.');
     }
-}
-
-// بند 15: جلب التفاصيل الكاملة لبطولة منتهية عند فتحها فقط (عند الطلب)
-async function loadFullTournament(idx) {
-    const db = getDB();
-    const t = db.tournaments[idx];
-    if(!t || t.loaded) return; // شغالة بس للبطولات المنتهية غير المحمّلة
-    try {
-        const { data, error } = await supabaseClient.from('tournaments').select('*').eq('id', t.id).single();
-        if(error) { console.error('Load full tournament failed', error); snack('⚠️ Failed to load tournament details.'); return; }
-        if(data) {
-            db.tournaments[idx] = {
-                ...data,
-                matches: data.matches || [], standings: data.standings || [],
-                participants: data.participants || [], schedule: data.schedule || null,
-                bracket: data.bracket || null, deltaLog: data.delta_log || [],
-                guestAssistEnabled: data.guest_assist_enabled || false, loaded: true
-            };
-            cloudDB.tournaments = db.tournaments;
-            localStorage.setItem(DB_KEY, JSON.stringify(db));
-        }
-    } catch(e) { console.error('Load full tournament error', e); snack('⚠️ Failed to load tournament details.'); }
 }
 
 // ============================================================
@@ -3010,7 +2667,7 @@ function updatePlayerMarketValue(db, pid, matchData) {
     const p = db.players.find(x => x.id === pid);
     if(!p) return;
     
-    let val = p.marketValue || 1000000; // Default starting price is 1M
+    let val = p.marketValue || 500000; // Default starting price is 500k
     
     // 1. Match Result Impact
     if(matchData.result === 'win') val += 100000;
@@ -3033,7 +2690,7 @@ function updatePlayerMarketValue(db, pid, matchData) {
 function awardMotmValue(db, pid) {
     const p = db.players.find(x => x.id === pid);
     if(p) {
-        p.marketValue = (p.marketValue || 1000000) + 200000; // MOTM gets +200k bonus
+        p.marketValue = (p.marketValue || 500000) + 200000; // MOTM gets +200k bonus
     }
 }
 
@@ -3075,6 +2732,45 @@ function nextSong() {
 }
 
 // ============================================================
+// NEWS HEADLINE VARIETY ENGINE
+// ============================================================
+function buildMatchHeadline(goalsA,goalsB,nameA,nameB,goalDiff){
+  const pick=arr=>arr[Math.floor(Math.random()*arr.length)];
+  if(goalsA===goalsB){
+    const templates=[
+      `🤝 STALEMATE: A tense battle ends ${goalsA}-${goalsB} between ${nameA} and ${nameB}.`,
+      `🤝 SHARED SPOILS: ${nameA} and ${nameB} split the points ${goalsA}-${goalsB}.`,
+      `🤝 DEADLOCK: Neither side could break through — ${goalsA}-${goalsB}.`
+    ];
+    return pick(templates);
+  }
+  const winner=goalsA>goalsB?nameA:nameB;
+  const loser=goalsA>goalsB?nameB:nameA;
+  const wG=Math.max(goalsA,goalsB), lG=Math.min(goalsA,goalsB);
+  if(goalDiff>=4){
+    const templates=[
+      `💥 MASSACRE: ${winner} humiliates ${loser} ${wG}-${lG}!`,
+      `💥 DEMOLITION: ${winner} destroys ${loser} ${wG}-${lG}!`,
+      `💥 ROUT: ${winner} runs riot over ${loser}, ${wG}-${lG}!`
+    ];
+    return pick(templates);
+  }
+  if(goalDiff>=2){
+    const templates=[
+      `🔥 COMFORTABLE WIN: ${winner} cruises past ${loser} ${wG}-${lG}.`,
+      `🔥 DOMINANT: ${winner} takes control against ${loser}, ${wG}-${lG}.`
+    ];
+    return pick(templates);
+  }
+  const templates=[
+    `👏 SOLID WIN: ${winner} edges past ${loser} ${wG}-${lG}.`,
+    `⚡ NARROW ESCAPE: ${winner} holds on to beat ${loser} ${wG}-${lG}.`,
+    `👏 HARD-FOUGHT: ${winner} scrapes past ${loser} ${wG}-${lG}.`
+  ];
+  return pick(templates);
+}
+
+// ============================================================
 // ACHIEVEMENT ENGINE (BADGES ONLY)
 // ============================================================
 function checkAchievements(db, matchEvents) {
@@ -3107,18 +2803,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.querySelector('.waiting-title').textContent = "CONNECTING...";
   document.querySelector('.waiting-sub').textContent = "Downloading live data from server...";
 
-  // إصلاح: مهلة زمنية للتحميل الأول — لو الاتصال "علّق" بالكامل من غير ما يرجع خطأ أو نجاح خلال 10 ثواني،
-  // التطبيق يكمل فتحه بدل ما يفضل واقف على شاشة "CONNECTING..." للأبد
-  const REFRESH_TIMEOUT_MS = 10000;
-  await Promise.race([
-    refreshData(),
-    new Promise(resolve => setTimeout(() => {
-      console.error('Initial refreshData timed out after 10s — proceeding anyway.');
-      snackWithRetry('⚠️ Slow connection — showing cached/local data.', () => location.reload());
-      resolve();
-    }, REFRESH_TIMEOUT_MS))
-  ]);
-  window.__footbolaAppEntered = true; // بعد هذه النقطة، أي خطأ يُسجَّل بصمت فقط، مش شاشة كاملة
+  await refreshData();
 
   const savedSession = localStorage.getItem('footbola_session');
   if(savedSession) {
