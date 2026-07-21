@@ -708,8 +708,8 @@ function renderGroupConfig(){
       </div>
       <div style="font-size:11px;color:var(--sub);margin-top:4px">Home &amp; Away means every pair inside a group plays each other twice.</div>
     </div>
-    <button class="btn btn-ghost" style="margin-bottom:10px" onclick="autoDistributeGroups()">🔀 Distribute Players Randomly</button>
-    <div style="font-size:11px;color:var(--sub);margin:-4px 0 10px">Tap any player chip afterwards to move them into the next group.</div>
+    <button class="btn btn-ghost" style="margin-bottom:10px" onclick="autoDistributeGroups()">🔀 Distribute Players Randomly (starting point)</button>
+    <div style="font-size:11px;color:var(--sub);margin:-4px 0 10px">Then tap any group letter next to a player to move them into that exact group — build any mix of group sizes you want.</div>
     <div id="group-boxes"></div>
     <label style="font-size:12px;display:flex;align-items:center;gap:6px;margin:10px 0;color:var(--sub)">
       <input type="checkbox" id="auto-qualify-chk" ${cData.autoQualify?'checked':''} onchange="cData.autoQualify=this.checked">
@@ -760,17 +760,25 @@ function renderGroupBoxes(){
     <span style="font-size:12px;font-weight:700;color:${valid?'var(--green)':'var(--red)'}">${valid?'✅':'⚠️'} Total Qualifiers: ${total}</span>
     <span style="font-size:11px;color:var(--sub)">${valid?'Ready for the Knockout Tree':'Must add up to exactly 2, 4, 8, or 16'}</span>
   </div>`;
+  const numGroups=cData.groupAssign.length;
   cData.groupAssign.forEach((group,gi)=>{
     const letter=String.fromCharCode(65+gi);
+    const qualifyField=group.length>0
+      ?`<input type="number" min="1" max="${group.length-1}" value="${cData.groupQualifiers[gi]||1}" style="width:44px;background:var(--card2);border:1px solid var(--border);color:white;border-radius:4px;text-align:center;padding:2px" onchange="setGroupQualifiers(${gi},this.value)">`
+      :`<span style="color:var(--red)">—</span>`;
     html+=`<div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <span style="font-weight:800;color:var(--gold)">Group ${letter} (${group.length})</span>
-        <span style="font-size:11px;color:var(--sub);display:flex;align-items:center;gap:6px">Qualify
-          <input type="number" min="1" max="${group.length-1}" value="${cData.groupQualifiers[gi]}" style="width:44px;background:var(--card2);border:1px solid var(--border);color:white;border-radius:4px;text-align:center;padding:2px" onchange="setGroupQualifiers(${gi},this.value)">
-        </span>
+        <span style="font-weight:800;color:var(--gold)">Group ${letter} (${group.length} player${group.length===1?'':'s'})</span>
+        <span style="font-size:11px;color:var(--sub);display:flex;align-items:center;gap:6px">Qualify ${qualifyField}</span>
       </div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px">
-        ${group.map(idx=>`<div class="p-chip" onclick="moveParticipant(${gi},${idx})" title="Tap to move to next group">${participantLabel(idx)}</div>`).join('')}
+      ${group.length===0?`<div style="font-size:11px;color:var(--sub);padding:4px 0">No players in this group yet — move some in using the letter buttons below.</div>`:''}
+      <div style="display:flex;flex-direction:column;gap:6px">
+        ${group.map(idx=>`<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;background:var(--card2);border-radius:8px;padding:7px 10px">
+          <span style="font-size:13px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${participantLabel(idx)}</span>
+          <div style="display:flex;gap:4px;flex-shrink:0">
+            ${Array.from({length:numGroups},(_,tgi)=>`<button onclick="moveParticipantTo(${gi},${idx},${tgi})" style="width:24px;height:24px;border-radius:6px;border:1.5px solid ${tgi===gi?'var(--gold)':'var(--border)'};background:${tgi===gi?'rgba(240,180,41,0.15)':'var(--card)'};color:${tgi===gi?'var(--gold)':'var(--sub)'};font-size:10px;font-weight:800;cursor:pointer;font-family:'Rajdhani',sans-serif">${String.fromCharCode(65+tgi)}</button>`).join('')}
+          </div>
+        </div>`).join('')}
       </div>
     </div>`;
   });
@@ -778,17 +786,20 @@ function renderGroupBoxes(){
 }
 function setGroupQualifiers(gi,val){
   const g=cData.groupAssign[gi];
+  if(g.length===0)return;
   let n=parseInt(val)||1;
   n=Math.max(1,Math.min(g.length-1,n));
   cData.groupQualifiers[gi]=n;
   renderGroupBoxes();
 }
-function moveParticipant(fromGi,idx){
+// Move a player directly into a specific group (tap a group-letter button).
+// This is how group sizes end up uneven/custom — no forced even split.
+function moveParticipantTo(fromGi,idx,toGi){
+  if(fromGi===toGi)return;
   const groups=cData.groupAssign;
-  const toGi=(fromGi+1)%groups.length;
   groups[fromGi]=groups[fromGi].filter(i=>i!==idx);
   groups[toGi].push(idx);
-  cData.groupQualifiers=groups.map((g,gi)=>Math.min(cData.groupQualifiers[gi]||2,Math.max(1,g.length-1)));
+  cData.groupQualifiers=groups.map((g,gi)=>g.length===0?0:Math.min(cData.groupQualifiers[gi]||2,Math.max(1,g.length-1)));
   renderGroupBoxes();
 }
 function renderCreatePlayers(){
