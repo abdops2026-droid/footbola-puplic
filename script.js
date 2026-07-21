@@ -30,6 +30,7 @@ async function saveDB(db) {
     const playerUpdates = db.players.map(p => ({
         player_id: p.id, name: p.name, pin: p.pin, photo: p.photo,
         tier: p.tier, stars: p.stars, stats: p.stats, market_value: p.marketValue,
+        previous_market_value: p.previousMarketValue ?? null,
         status: p.status || 'active'
     }));
 
@@ -81,6 +82,7 @@ async function saveSinglePlayer(p) {
     await supabaseClient.from('players').upsert({
         player_id: p.id, name: p.name, pin: p.pin, photo: p.photo,
         tier: p.tier, stars: p.stars, stats: p.stats, market_value: p.marketValue,
+        previous_market_value: p.previousMarketValue ?? null,
         status: p.status || 'active'
     }, { onConflict: 'player_id' });
 }
@@ -91,6 +93,9 @@ async function saveSinglePlayer(p) {
 let currentUser=null;
 let activeTournIdx=null;
 let cData={format:'league',type:'1v1',selected:[],teams:[]};
+let arenaFilterStatus='all';
+let lockerFilterTier='all';
+let marketFilterTier='all';
 let pendingPro=null;
 let motmMatchIdx=null;
 let motmVotes={motm:null,ratings:{}};
@@ -102,7 +107,7 @@ function genID(){const c='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';return'FBL-'+Array.f
 function initials(name){return name.split(' ').map(w=>w[0]||'').join('').toUpperCase().slice(0,2)||'??'}
 function avHTML(p,size=46){
   const s=`width:${size}px;height:${size}px;font-size:${Math.round(size*0.32)}px`;
-  return `<div class="pav" style="${s}">${p.photo?`<img src="${p.photo}">`:`${initials(p.name)}`}</div>`
+  return `<div class="pav" style="${s}">${p.photo?`<img src="${p.photo}" loading="lazy">`:`${initials(p.name)}`}</div>`
 }
 function showScreen(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById(id)?.classList.add('active')}
 
@@ -137,6 +142,19 @@ function showTab(tab){
 function showErr(id,msg){const el=document.getElementById(id);if(el){el.textContent=msg;el.classList.add('show')}}
 function hideErr(id){document.getElementById(id)?.classList.remove('show')}
 function snack(msg){const el=document.getElementById('snack');el.textContent=msg;el.classList.add('show');clearTimeout(snack._t);snack._t=setTimeout(()=>el.classList.remove('show'),2800)}
+
+// ============================================================
+// PERFORMANCE: skip re-writing the DOM when the HTML we're about
+// to render is identical to what's already there — avoids needless
+// reflow/repaint on every tab switch or timer tick.
+// ============================================================
+const _renderCache=new WeakMap();
+function setHTMLIfChanged(el,html){
+  if(!el)return;
+  if(_renderCache.get(el)===html)return;
+  _renderCache.set(el,html);
+  el.innerHTML=html;
+}
 function closeModal(id){document.getElementById(id)?.classList.remove('active')}
 function closeConf(){document.getElementById('conf-ov')?.classList.remove('active')}
 
@@ -315,7 +333,7 @@ function renderUserBadge(){
   } else {
     const db=getDB();const p=db.players.find(x=>x.id===currentUser.id);
     const xp=p?.stats?.xp||0;const lvl=getLevelFromXP(xp);
-    const avEl=p?.photo?`<div class="uav"><img src="${p.photo}"></div>`:`<div class="uav">${initials(currentUser.name)}</div>`;
+    const avEl=p?.photo?`<div class="uav"><img src="${p.photo}" loading="lazy"></div>`:`<div class="uav">${initials(currentUser.name)}</div>`;
     el.innerHTML=`${avEl}<span style="font-size:13px">${currentUser.name}</span><span class="lvl-badge">LVL ${lvl}</span>`;
   }
 }
@@ -392,11 +410,155 @@ async function adminResetPin(){
 // ============================================================
 // TAB ROUTING
 // ============================================================
+// ============================================================
+// MANAGER DASHBOARD (ADMIN ONLY)
+// ============================================================
+function renderDashboard(){
+  const db=getDB();
+  const container=document.getElementById('tab-dashboard');
+  if(!container)return;
+  if(currentUser?.type!=='admin'){
+    container.innerHTML=`<div class="empty-state"><div class="empty-ico">🔒</div><div class="empty-txt">Admin access only.</div></div>`;
+    return;
+  }
+  const players=db.players||[];
+  const activeP=players.filter(p=>!p.status||p.status==='active').length;
+  const suspendedP=players.filter(p=>p.status==='suspended').length;
+  const bannedP=players.filter(p=>p.status==='banned').length;
+  const archivedP=players.filter(p=>p.status==='archived').length;
+
+  const tournaments=db.tournaments||[];
+  const liveT=tournaments.filter(t=>t.status==='active'&&!t.archivedAt).length;
+  const endedT=tournaments.filter(t=>t.status==='ended'&&!t.archivedAt).length;
+  const archivedT=tournaments.filter(t=>t.archivedAt).length;
+
+  const topScorer=[...players].sort((a,b)=>(b.stats?.goals||0)-(a.stats?.goals||0))[0];
+  const mostTrophies=[...players].sort((a,b)=>(b.stats?.trophies||0)-(a.stats?.trophies||0))[0];
+  const mostValuable=[...players].sort((a,b)=>(b.marketValue||0)-(a.marketValue||0))[0];
+  const totalValue=players.reduce((sum,p)=>sum+(p.marketValue||500000),0);
+  const totalValueStr=totalValue>=1000000?`€${(totalValue/1000000).toFixed(2)}M`:`€${(totalValue/1000).toFixed(0)}K`;
+
+  const allMatches=[];
+  tournaments.forEach(t=>{(t.matches||[]).forEach(m=>{allMatches.push({...m,tournamentName:t.name});});});
+  allMatches.sort((a,b)=>(b.ts||0)-(a.ts||0));
+  const recent=allMatches.slice(0,8);
+
+  const statCard=(icon,val,lbl,color)=>`<div class="stat-cell" style="padding:12px 4px${color?`;border-color:${color}`:''}"><div class="stat-val" style="font-size:22px${color?`;color:${color}`:''}">${icon} ${val}</div><div class="stat-lbl">${lbl}</div></div>`;
+
+  container.innerHTML=`
+    <div class="sec-hdr"><div class="sec-ttl">📊 Manager Dashboard</div></div>
+    <div style="padding:0 14px 14px">
+      <div class="settings-card">
+        <div class="settings-title" style="font-size:11px">👥 Players (${players.length} total)</div>
+        <div class="stat-grid" style="grid-template-columns:repeat(4,1fr);gap:6px">
+          ${statCard('🟢',activeP,'Active','var(--green)')}
+          ${statCard('🟥',suspendedP,'Suspended','var(--red)')}
+          ${statCard('🚫',bannedP,'Banned','var(--red)')}
+          ${statCard('📦',archivedP,'Archived')}
+        </div>
+      </div>
+      <div class="settings-card">
+        <div class="settings-title" style="font-size:11px">🏟️ Tournaments (${tournaments.length} total)</div>
+        <div class="stat-grid" style="grid-template-columns:repeat(3,1fr);gap:6px">
+          ${statCard('🔴',liveT,'Live','var(--green)')}
+          ${statCard('🏁',endedT,'Ended')}
+          ${statCard('📦',archivedT,'Archived')}
+        </div>
+      </div>
+      <div class="settings-card">
+        <div class="settings-title" style="font-size:11px">🌟 Leaders</div>
+        <div style="font-size:13px;line-height:2">
+          <div>⚽ Top Scorer: <strong style="color:var(--gold)">${topScorer?.name||'—'}</strong> (${topScorer?.stats?.goals||0} goals)</div>
+          <div>🏆 Most Decorated: <strong style="color:var(--gold)">${mostTrophies?.name||'—'}</strong> (${mostTrophies?.stats?.trophies||0} trophies)</div>
+          <div>💰 Most Valuable: <strong style="color:var(--gold)">${mostValuable?.name||'—'}</strong> (€${(((mostValuable?.marketValue)||500000)/1000000).toFixed(2)}M)</div>
+          <div>📊 Total Squad Value: <strong style="color:var(--gold)">${totalValueStr}</strong></div>
+        </div>
+      </div>
+      <div class="settings-card">
+        <div class="settings-title" style="font-size:11px">🕒 Recent Activity</div>
+        ${recent.length===0?`<div style="font-size:12px;color:var(--sub)">No matches recorded yet.</div>`:recent.map(m=>`
+          <div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0;border-bottom:1px solid var(--border)">
+            <span>${m.teamA} <strong>${m.goalsA}-${m.goalsB}</strong> ${m.teamB}</span>
+            <span style="color:var(--sub)">${m.tournamentName}</span>
+          </div>`).join('')}
+      </div>
+      <div class="settings-card">
+        <div class="settings-title" style="font-size:11px">💾 Backup & Restore</div>
+        <div style="font-size:11px;color:var(--sub);margin-bottom:8px">Export a full backup of every player, tournament, and news item, or restore from a previous backup file.</div>
+        <button class="btn btn-blue" style="margin-bottom:8px" onclick="exportBackup()">⬇️ Export Backup (.json)</button>
+        <input type="file" id="restore-file-input" accept=".json" style="display:none" onchange="handleRestoreFile(this)">
+        <button class="btn btn-gold" onclick="document.getElementById('restore-file-input').click()">⬆️ Restore From Backup</button>
+      </div>
+    </div>`;
+}
+
+function exportBackup(){
+  const db=getDB();
+  const backup={
+    exportedAt:new Date().toISOString(),
+    version:1,
+    players:db.players||[],
+    tournaments:db.tournaments||[],
+    news:db.news||[],
+    adminCodes:db.adminCodes||null
+  };
+  const blob=new Blob([JSON.stringify(backup,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  const dateStr=new Date().toISOString().slice(0,10);
+  a.href=url;a.download=`footbola-backup-${dateStr}.json`;
+  document.body.appendChild(a);a.click();document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  snack('⬇️ Backup downloaded.');
+}
+
+function handleRestoreFile(input){
+  const file=input.files[0];if(!file)return;
+  const reader=new FileReader();
+  reader.onload=async(e)=>{
+    let data;
+    try{data=JSON.parse(e.target.result);}
+    catch(err){snack('❌ Invalid backup file — not valid JSON.');input.value='';return;}
+    if(!Array.isArray(data.players)||!Array.isArray(data.tournaments)){
+      snack("❌ This file doesn't look like a Footbola backup.");input.value='';return;
+    }
+    const confirmText=prompt(`⚠️ DANGER: This will REPLACE ALL current players (${data.players.length} in backup) and tournaments (${data.tournaments.length} in backup) with this backup from ${data.exportedAt||'an unknown date'}.\n\nEverything currently in the app that isn't in this backup will be permanently lost.\n\nType "RESTORE" to confirm.`);
+    if(confirmText!=='RESTORE'){snack('❌ Restore canceled.');input.value='';return;}
+    await restoreBackup(data);
+    input.value='';
+  };
+  reader.readAsText(file);
+}
+
+async function restoreBackup(data){
+  const db=getDB();
+  try{
+    // Wipe the cloud tables first so this is a true replace, not a merge with old rows
+    await supabaseClient.from('players').delete().neq('player_id','__never__');
+    await supabaseClient.from('tournaments').delete().neq('id',-1);
+
+    db.players=data.players||[];
+    db.tournaments=data.tournaments||[];
+    db.news=data.news||[];
+    if(data.adminCodes)db.adminCodes=data.adminCodes;
+
+    await saveDB(db);
+    localStorage.setItem(DB_KEY, JSON.stringify(db));
+    snack('✅ Backup restored successfully!');
+    renderDashboard();
+    renderArena();
+  }catch(err){
+    console.error(err);
+    snack('❌ Restore failed — check your connection and try again.');
+  }
+}
+
 function renderTab(tab){
   if(tab==='arena')renderArena();
   else if(tab==='locker')renderLocker();
   else if(tab==='history')renderHistory();
   else if(tab==='market')renderMarket();
+  else if(tab==='dashboard')renderDashboard();
 }
 
 // ============================================================
@@ -433,19 +595,47 @@ function renderNewsFeed(){
 // ============================================================
 // ARENA
 // ============================================================
+function setArenaFilter(el){
+  el.parentElement.querySelectorAll('.f-opt').forEach(x=>x.classList.remove('sel'));
+  el.classList.add('sel');
+  arenaFilterStatus=el.dataset.val;
+  renderArena();
+}
+function setLockerFilter(el){
+  el.parentElement.querySelectorAll('.f-opt').forEach(x=>x.classList.remove('sel'));
+  el.classList.add('sel');
+  lockerFilterTier=el.dataset.val;
+  renderLocker();
+}
+function setMarketFilter(el){
+  el.parentElement.querySelectorAll('.f-opt').forEach(x=>x.classList.remove('sel'));
+  el.classList.add('sel');
+  marketFilterTier=el.dataset.val;
+  renderMarket();
+}
+
 function renderArena(){
   const db=getDB();
   const isAdmin=currentUser?.type==='admin';
   const createBtn=document.getElementById('create-btn');
   if(createBtn)createBtn.style.display=isAdmin?'flex':'none';
+  const navDash=document.getElementById('nav-dashboard');
+  if(navDash)navDash.style.display=isAdmin?'':'none';
+  const archChip=document.getElementById('arena-filter-archived');
+  if(archChip)archChip.style.display=isAdmin?'':'none';
   renderNewsFeed();
   const list=document.getElementById('tournament-list');
-  const items=db.tournaments.map((t,i)=>({t,i})).filter(x=>isAdmin||!x.t.archivedAt);
+  const searchTerm=(document.getElementById('arena-search')?.value||'').trim().toLowerCase();
+  let items=db.tournaments.map((t,i)=>({t,i})).filter(x=>isAdmin||!x.t.archivedAt);
+  if(searchTerm)items=items.filter(({t})=>t.name.toLowerCase().includes(searchTerm));
+  if(arenaFilterStatus==='active')items=items.filter(({t})=>t.status==='active'&&!t.archivedAt);
+  else if(arenaFilterStatus==='ended')items=items.filter(({t})=>t.status==='ended'&&!t.archivedAt);
+  else if(arenaFilterStatus==='archived')items=items.filter(({t})=>!!t.archivedAt);
   if(items.length===0){
-    list.innerHTML=`<div class="empty-state"><div class="empty-ico">🏟️</div><div class="empty-txt">No tournaments yet.<br>${isAdmin?'Tap CREATE to start!':'Ask the Manager.'}</div></div>`;
+    list.innerHTML=`<div class="empty-state"><div class="empty-ico">🏟️</div><div class="empty-txt">${searchTerm||arenaFilterStatus!=='all'?'No tournaments match your search/filter.':`No tournaments yet.<br>${isAdmin?'Tap CREATE to start!':'Ask the Manager.'}`}</div></div>`;
     return;
   }
-  list.innerHTML=items.map(({t,i})=>{
+  setHTMLIfChanged(list, items.map(({t,i})=>{
     const badge=t.archivedAt
       ?`<span class="ended-badge">📦 ARCHIVED</span>`
       :t.status==='ended'
@@ -456,7 +646,7 @@ function renderArena(){
       <div class="t-name">${t.name}</div>
       <div class="t-meta">${t.type.toUpperCase()} · ${t.format==='league'?'🏅 League':'🌳 Elimination'} · ${t.participants.length} ${t.type==='2v2'?'teams':'players'}</div>
     </div>`;
-  }).join('');
+  }).join(''));
 }
 
 function buildAvatarStack(t,db){
@@ -564,6 +754,12 @@ function participantLabel(idx){
 function renderGroupBoxes(){
   const box=document.getElementById('group-boxes');if(!box)return;
   let html='';
+  const total=cData.groupQualifiers.reduce((s,n)=>s+(n||0),0);
+  const valid=[2,4,8,16].includes(total);
+  html+=`<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;margin-bottom:10px;border-radius:10px;background:${valid?'rgba(46,204,113,0.08)':'rgba(255,71,87,0.08)'};border:1px solid ${valid?'var(--green)':'var(--red)'}">
+    <span style="font-size:12px;font-weight:700;color:${valid?'var(--green)':'var(--red)'}">${valid?'✅':'⚠️'} Total Qualifiers: ${total}</span>
+    <span style="font-size:11px;color:var(--sub)">${valid?'Ready for the Knockout Tree':'Must add up to exactly 2, 4, 8, or 16'}</span>
+  </div>`;
   cData.groupAssign.forEach((group,gi)=>{
     const letter=String.fromCharCode(65+gi);
     html+=`<div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px">
@@ -585,6 +781,7 @@ function setGroupQualifiers(gi,val){
   let n=parseInt(val)||1;
   n=Math.max(1,Math.min(g.length-1,n));
   cData.groupQualifiers[gi]=n;
+  renderGroupBoxes();
 }
 function moveParticipant(fromGi,idx){
   const groups=cData.groupAssign;
@@ -596,21 +793,23 @@ function moveParticipant(fromGi,idx){
 }
 function renderCreatePlayers(){
   const db=getDB();const sec=document.getElementById('create-players-section');
+  const eligible=p=>!p.status||p.status==='active';
   if(cData.type==='1v1'){
-    if(db.players.length===0){sec.innerHTML=`<div class="field"><label>Select Players</label><div style="font-size:13px;color:var(--sub);padding:6px 0">No approved players yet.</div></div>`;return}
-    sec.innerHTML=`<div class="field"><label>Select Players (min 2)</label><div class="p-sel-list">
-      ${db.players.map(p=>{
+    const pool=db.players.filter(eligible);
+    if(pool.length===0){sec.innerHTML=`<div class="field"><label>Select Players</label><div style="font-size:13px;color:var(--sub);padding:6px 0">No eligible players yet (suspended/archived/banned players are hidden here).</div></div>`;return}
+    sec.innerHTML=`<div class="field"><label>Select Players (min 2)</label><div style="font-size:11px;color:var(--sub);margin:-2px 0 8px">Suspended, archived, or banned players don't appear here.</div><div class="p-sel-list">
+      ${pool.map(p=>{
         const sel=cData.selected.includes(p.id);
         return`<div class="p-sel-item ${sel?'sel':''}" onclick="toggleSel('${p.id}')">
-          <div class="pav" style="width:32px;height:32px;font-size:11px">${p.photo?`<img src="${p.photo}">`:`${initials(p.name)}`}</div>
+          <div class="pav" style="width:32px;height:32px;font-size:11px">${p.photo?`<img src="${p.photo}" loading="lazy">`:`${initials(p.name)}`}</div>
           <div style="flex:1"><div style="font-size:13px;font-weight:700">${p.name}</div><div style="font-size:11px;color:var(--sub)">${p.id}</div></div>
           <div class="check">${sel?'✓':''}</div>
         </div>`;
       }).join('')}
     </div></div>`;
   } else {
-    const pros=db.players.filter(p=>p.tier==='pro');
-    const youths=db.players.filter(p=>p.tier!=='pro');
+    const pros=db.players.filter(p=>p.tier==='pro'&&eligible(p));
+    const youths=db.players.filter(p=>p.tier!=='pro'&&eligible(p));
     const usedIds=cData.teams.flatMap(t=>[t.proId,t.youthId]);
     sec.innerHTML=`
       <div class="divider"></div>
@@ -687,6 +886,11 @@ async function createTournament(){
   if(cData.format==='groups'){
     if(!cData.groupAssign){showErr('create-err','Distribute the players into groups first!');resetCreateBtn();return}
     if(cData.groupAssign.some(g=>g.length<2)){showErr('create-err','Every group needs at least 2 players!');resetCreateBtn();return}
+    const totalQualifiers=cData.groupQualifiers.reduce((s,x)=>s+(x||0),0);
+    if(![2,4,8,16].includes(totalQualifiers)){
+      showErr('create-err',`The total qualifiers across all groups is ${totalQualifiers} — it must add up to exactly 2, 4, 8, or 16 to build a valid Knockout Tree. Adjust the "Qualify" number in each group.`);
+      resetCreateBtn();return;
+    }
     const groups=cData.groupAssign.map((idxArr,gi)=>{
       const ids=idxArr.map(i=>standings[i].id);
       idxArr.forEach(i=>{standings[i].group=gi;});
@@ -855,6 +1059,10 @@ async function qualifyGroupsToKnockout(db,t){
     previewLines.push(`${g.name}: ${picks.map(s=>s.name).join(', ')}`);
   });
   if(qualifiedIds.length<2){snack('⚠️ Not enough qualifiers to build a bracket!');return}
+  if(![2,4,8,16].includes(qualifiedIds.length)){
+    snack(`⚠️ Total qualifiers is ${qualifiedIds.length} — it must be exactly 2, 4, 8, or 16. Adjust each group's qualifier count and try again.`);
+    return;
+  }
 
   const headerMsg = unplayed>0
     ? `⚠️ ${unplayed} group-stage match(es) are still unplayed.\n\n`
@@ -2004,7 +2212,7 @@ function closeWinnerOverlay(){document.getElementById('winner-overlay').classLis
 // ============================================================
 function renderLocker(){
   const db=getDB();const isAdmin=currentUser?.type==='admin';
-  const container=document.getElementById('tab-locker');
+  const container=document.getElementById('locker-list-container');
   let html='';
   
   if(isAdmin){
@@ -2013,7 +2221,7 @@ function renderLocker(){
       <div class="req-box-title">📥 Pending Requests <span style="background:rgba(255,71,87,0.18);padding:1px 8px;border-radius:10px">${pend.length}</span></div>
       ${pend.length===0?'<div style="font-size:13px;color:var(--sub)">No pending requests.</div>'
         :pend.map((p,i)=>`<div class="req-item">
-          <div class="pav" style="width:40px;height:40px;font-size:14px;flex-shrink:0">${p.photo?`<img src="${p.photo}">`:initials(p.name)}</div>
+          <div class="pav" style="width:40px;height:40px;font-size:14px;flex-shrink:0">${p.photo?`<img src="${p.photo}" loading="lazy">`:initials(p.name)}</div>
           <div class="req-info"><div class="req-name">${p.name}</div><div class="req-sub">Waiting for approval</div></div>
           <button class="btn-ok" onclick="approvePlayer(${i})">APPROVE</button>
           <button class="btn-x" onclick="denyPlayer(${i})">✕</button>
@@ -2031,7 +2239,7 @@ function renderLocker(){
       const starHTML=[1,2,3,4,5].map(n=>`<button class="star-b ${stars>=n?'lit':''}" onclick="${isAdmin?`setStar(${i},${n})`:'void(0)'}" ${isAdmin?'':'disabled'}>⭐</button>`).join('');
       
       return `<div class="player-card" style="${opacityStyle} ${dashStyle}">
-        <div class="pav" style="cursor:pointer" onclick="openProfile(${i},${currentUser?.id===p.id})">${p.photo?`<img src="${p.photo}">`:`${initials(p.name)}`}</div>
+        <div class="pav" style="cursor:pointer" onclick="openProfile(${i},${currentUser?.id===p.id})">${p.photo?`<img src="${p.photo}" loading="lazy">`:`${initials(p.name)}`}</div>
         <div class="p-info" style="cursor:pointer" onclick="openProfile(${i},${currentUser?.id===p.id})">
           <div class="p-name">${p.name} ${p.status === 'suspended' ? '<span style="background:var(--red); color:#fff; font-size:9px; padding:2px 6px; border-radius:4px; font-weight:bold; margin-left:5px">🟥 SUSPENDED</span>' : ''} <span class="lvl-badge">LVL ${lvl}</span><span class="tier-chip ${tier==='pro'?'tc-pro':'tc-youth'}">${tier==='pro'?'⭐ PRO':'🌱 YOUTH'}</span></div>
           <div class="p-id">${p.id}</div>
@@ -2051,16 +2259,28 @@ function renderLocker(){
       }
   }
 
-  html+=`<div class="sec-hdr"><div class="sec-ttl">👕 Official Roster</div><div style="font-size:12px;color:var(--sub)">${db.players.length} players</div></div>`;
-  html+=`<div class="player-list">`;
+  const searchTerm=(document.getElementById('locker-search')?.value||'').trim().toLowerCase();
+  let shownCount=0;
+  let rosterHtml='';
   db.players.forEach((p,i)=>{
       if(p.status === 'archived' && !isAdmin) return;
       if(p.status === 'banned') return;
       if(currentUser?.type === 'player' && p.id === currentUser.id) return; 
-      html += createCard(p, i, false);
+      if(searchTerm && !p.name.toLowerCase().includes(searchTerm)) return;
+      if(lockerFilterTier==='pro' && p.tier!=='pro') return;
+      if(lockerFilterTier==='youth' && p.tier!=='youth') return;
+      if(lockerFilterTier==='suspended' && p.status!=='suspended') return;
+      rosterHtml += createCard(p, i, false);
+      shownCount++;
   });
+
+  html+=`<div class="sec-hdr"><div class="sec-ttl">👕 Official Roster</div><div style="font-size:12px;color:var(--sub)">${shownCount} player${shownCount===1?'':'s'}</div></div>`;
+  html+=`<div class="player-list">`;
+  html+= shownCount===0
+    ? `<div class="empty-state"><div class="empty-ico">👕</div><div class="empty-txt">No players match your search/filter.</div></div>`
+    : rosterHtml;
   html+='</div>';
-  container.innerHTML=html;
+  setHTMLIfChanged(container, html);
 }
 
 function getPlayerForm(pid,db){
@@ -2185,7 +2405,7 @@ function openAdminManagePlayer(idx){
   const body=document.getElementById('admin-player-body');
   body.innerHTML=`
     <div style="text-align:center;margin-bottom:16px">
-      <div class="pav" style="width:60px;height:60px;margin:0 auto 10px;font-size:20px">${p.photo?`<img src="${p.photo}">`:`${initials(p.name)}`}</div>
+      <div class="pav" style="width:60px;height:60px;margin:0 auto 10px;font-size:20px">${p.photo?`<img src="${p.photo}" loading="lazy">`:`${initials(p.name)}`}</div>
       <div style="font-weight:700;font-size:16px">${p.name}</div>
       <div style="font-size:11px;color:var(--sub)">${p.id}</div>
     </div>
@@ -2202,7 +2422,7 @@ function openAdminManagePlayer(idx){
     <div class="settings-card">
       <div class="settings-title">🖼️ Update Photo</div>
       <div class="photo-row">
-        <div class="photo-preview" id="manage-photo-prev" onclick="document.getElementById('manage-photo-file').click()">${p.photo?`<img src="${p.photo}">`:'📷'}</div>
+        <div class="photo-preview" id="manage-photo-prev" onclick="document.getElementById('manage-photo-file').click()">${p.photo?`<img src="${p.photo}" loading="lazy">`:'📷'}</div>
         <div><div style="font-size:14px;font-weight:600">Tap to change</div></div>
       </div>
       <input type="file" id="manage-photo-file" accept="image/*" style="display:none" onchange="handlePhoto(this,'manage-photo-prev','manage-photo-data')">
@@ -2294,16 +2514,31 @@ function openProfile(idx,canEdit=false){
       (t.matches || []).forEach(m => {
           if (t.type === '1v1') {
               if(m.aId === p.id || m.bId === p.id) {
-                  playerMatches.push({ goals: m.aId === p.id ? m.goalsA : m.goalsB, ts: m.ts });
+                  const myGoals = m.aId === p.id ? m.goalsA : m.goalsB;
+                  const oppGoals = m.aId === p.id ? m.goalsB : m.goalsA;
+                  const result = myGoals>oppGoals?'W':(myGoals<oppGoals?'L':'D');
+                  playerMatches.push({ goals: myGoals, ts: m.ts, result });
               }
           } else {
               // 2v2 check
               if(m.events && m.events.goals && m.events.goals[p.id] !== undefined) {
-                  playerMatches.push({ goals: m.events.goals[p.id], ts: m.ts });
+                  const tA=t.standings.find(s=>s.id===m.aId), tB=t.standings.find(s=>s.id===m.bId);
+                  const onTeamA = tA && (tA.proId===p.id||tA.youthId===p.id);
+                  const myGoals = m.events.goals[p.id];
+                  const result = onTeamA
+                    ? (m.goalsA>m.goalsB?'W':(m.goalsA<m.goalsB?'L':'D'))
+                    : (m.goalsB>m.goalsA?'W':(m.goalsB<m.goalsA?'L':'D'));
+                  playerMatches.push({ goals: myGoals, ts: m.ts, result });
               }
           }
       });
   });
+  const totalMatches=playerMatches.length;
+  const wins=playerMatches.filter(m=>m.result==='W').length;
+  const draws=playerMatches.filter(m=>m.result==='D').length;
+  const losses=playerMatches.filter(m=>m.result==='L').length;
+  const winRate=totalMatches?Math.round((wins/totalMatches)*100):0;
+  const avgGoalsPerMatch=totalMatches?(playerMatches.reduce((sum,m)=>sum+m.goals,0)/totalMatches).toFixed(1):'0.0';
   
   // Sort oldest to newest, get the last 5 matches
   playerMatches.sort((a,b) => a.ts - b.ts);
@@ -2335,7 +2570,7 @@ function openProfile(idx,canEdit=false){
 
   document.getElementById('profile-content').innerHTML=`
     <div class="profile-header">
-      <div class="profile-avatar">${p.photo?`<img src="${p.photo}">`:`${initials(p.name)}`}</div>
+      <div class="profile-avatar">${p.photo?`<img src="${p.photo}" loading="lazy">`:`${initials(p.name)}`}</div>
       <div class="profile-name">${p.name}</div>
       <div class="profile-id">${p.id} · ${p.tier==='pro'?'⭐ PRO':'🌱 YOUTH'}</div>
       <div style="margin-top:6px;font-size:16px;color:var(--purple);font-weight:700;font-family:'Bebas Neue',sans-serif;letter-spacing:1px">🌐 ${s.elo || 1000} GLOBAL ELO</div>
@@ -2350,6 +2585,20 @@ function openProfile(idx,canEdit=false){
     <div style="margin-top:14px; padding:14px; background:var(--card); border-radius:12px; border:1px solid var(--border); text-align:center">
       <div style="font-size:10px; font-weight:700; letter-spacing:1.5px; color:var(--sub); margin-bottom:8px">ACHIEVEMENTS</div>
       ${badgesHtml}
+    </div>
+
+    <div class="settings-card" style="margin-top:14px">
+      <div class="settings-title" style="font-size:11px">📈 Advanced Stats</div>
+      <div class="stat-grid" style="grid-template-columns: 1fr 1fr; gap:6px">
+        <div class="stat-cell"><div class="stat-val" style="color:${winRate>=50?'var(--green)':'var(--sub)'}">${winRate}%</div><div class="stat-lbl">Win Rate (${totalMatches} played)</div></div>
+        <div class="stat-cell"><div class="stat-val">${avgGoalsPerMatch}</div><div class="stat-lbl">Goals / Match</div></div>
+      </div>
+      <div style="display:flex;justify-content:space-around;margin-top:8px;font-size:12px;color:var(--sub)">
+        <span style="color:var(--green);font-weight:700">${wins}W</span>
+        <span style="font-weight:700">${draws}D</span>
+        <span style="color:var(--red);font-weight:700">${losses}L</span>
+        ${avgRating?`<span style="color:var(--gold);font-weight:700">⭐ ${avgRating.toFixed(1)} avg rating</span>`:''}
+      </div>
     </div>
 
     <div class="stat-grid" style="grid-template-columns: 1fr 1fr 1fr 1fr; gap:6px; margin-top:14px">
@@ -2399,7 +2648,7 @@ function openEditSelfProfile(idx){
     <div class="settings-card">
       <div class="settings-title">🖼️ Change Photo</div>
       <div class="photo-row">
-        <div class="photo-preview" id="self-photo-prev" onclick="document.getElementById('self-photo-file').click()">${p.photo?`<img src="${p.photo}">`:'📷'}</div>
+        <div class="photo-preview" id="self-photo-prev" onclick="document.getElementById('self-photo-file').click()">${p.photo?`<img src="${p.photo}" loading="lazy">`:'📷'}</div>
         <div><div style="font-size:14px;font-weight:600">Tap to upload</div></div>
       </div>
       <input type="file" id="self-photo-file" accept="image/*" style="display:none" onchange="handlePhoto(this,'self-photo-prev','self-photo-data')">
@@ -2491,19 +2740,48 @@ function renderMarket(){
     el.innerHTML=`<div class="empty-state"><div class="empty-ico">💸</div><div class="empty-txt">No players in the market yet.</div></div>`;
     return;
   }
-  const sorted=[...db.players].sort((a,b)=>(b.marketValue||500000)-(a.marketValue||500000));
-  const totalValue=sorted.reduce((sum,p)=>sum+(p.marketValue||500000),0);
+  const allSorted=[...db.players].sort((a,b)=>(b.marketValue||500000)-(a.marketValue||500000));
+  const totalValue=allSorted.reduce((sum,p)=>sum+(p.marketValue||500000),0);
   const totalStr=totalValue>=1000000?`€${(totalValue/1000000).toFixed(2)}M`:`€${(totalValue/1000).toFixed(0)}K`;
-  el.innerHTML=`
+
+  const searchTerm=(document.getElementById('market-search')?.value||'').trim().toLowerCase();
+  let sorted=allSorted;
+  if(searchTerm)sorted=sorted.filter(p=>p.name.toLowerCase().includes(searchTerm));
+  if(marketFilterTier==='pro')sorted=sorted.filter(p=>p.tier==='pro');
+  else if(marketFilterTier==='youth')sorted=sorted.filter(p=>p.tier!=='pro');
+
+  // 🔥 Top Risers — players whose value went up since the last change
+  const risers=[...db.players]
+    .filter(p=>p.previousMarketValue!=null && (p.marketValue||0) > p.previousMarketValue)
+    .sort((a,b)=>(b.marketValue-b.previousMarketValue)-(a.marketValue-a.previousMarketValue))
+    .slice(0,3);
+  const risersHtml = risers.length ? `
+    <div class="settings-card" style="padding:12px;margin:0 14px 10px">
+      <div class="settings-title" style="font-size:11px;color:var(--green)">🔥 Top Risers</div>
+      ${risers.map(p=>{
+        const gain=p.marketValue-p.previousMarketValue;
+        const gainStr=gain>=1000000?`€${(gain/1000000).toFixed(2)}M`:`€${(gain/1000).toFixed(0)}K`;
+        return `<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0"><span>${p.name}</span><span style="color:var(--green);font-weight:700">▲ +${gainStr}</span></div>`;
+      }).join('')}
+    </div>` : '';
+
+  setHTMLIfChanged(el, `
     <div class="budget-bar">
       <div><div style="font-size:10px;font-weight:700;letter-spacing:1.5px;color:var(--sub);margin-bottom:3px">TOTAL SQUAD VALUE</div><div class="budget-val">${totalStr}</div></div>
-      <div style="font-size:12px;color:var(--sub);font-weight:600">${sorted.length} Player${sorted.length===1?'':'s'}</div>
+      <div style="font-size:12px;color:var(--sub);font-weight:600">${allSorted.length} Player${allSorted.length===1?'':'s'}</div>
     </div>
+    ${risersHtml}
     <div style="padding:6px 14px">
-      ${sorted.map((p,i)=>{
+      ${sorted.length===0?`<div class="empty-state"><div class="empty-ico">💸</div><div class="empty-txt">No players match your search/filter.</div></div>`:sorted.map((p,i)=>{
         const val=p.marketValue||500000;
         const valStr=val>=1000000?`€${(val/1000000).toFixed(2)}M`:`€${(val/1000).toFixed(0)}K`;
         const xp=p.stats?.xp||0;const lvl=getLevelFromXP(xp);
+        let trendHtml='';
+        if(p.previousMarketValue!=null){
+          if(val>p.previousMarketValue)trendHtml=`<span style="color:var(--green);font-size:11px;font-weight:700">▲</span>`;
+          else if(val<p.previousMarketValue)trendHtml=`<span style="color:var(--red);font-size:11px;font-weight:700">▼</span>`;
+          else trendHtml=`<span style="color:var(--sub);font-size:11px;font-weight:700">–</span>`;
+        }
         return`<div class="market-card">
           ${avHTML(p,44)}
           <div style="flex:1">
@@ -2511,13 +2789,13 @@ function renderMarket(){
             <div style="font-size:12px;color:var(--sub);margin-top:2px;font-weight:600">${p.tier==='pro'?'⭐ PRO':'🌱 YOUTH'} · ${p.stats?.goals||0} goals</div>
           </div>
           <div>
-            <div class="market-val">${valStr}</div>
+            <div class="market-val">${trendHtml} ${valStr}</div>
             <div class="market-val-lbl">VALUE</div>
             ${isAdmin?`<button class="bid-btn" style="margin-top:6px" onclick="adjustValue('${p.id}')">ADJUST</button>`:`<button class="bid-btn" style="margin-top:6px;opacity:0.5;cursor:default">BID</button>`}
           </div>
         </div>`;
       }).join('')}
-    </div>`;
+    </div>`);
 }
 
 async function adjustValue(pid){
@@ -2526,6 +2804,7 @@ async function adjustValue(pid){
   const cur=((p.marketValue||500000)/1000000).toFixed(2);
   const input=prompt(`Set new market value for ${p.name} (in millions €):`,cur);
   if(!input||isNaN(parseFloat(input)))return;
+  p.previousMarketValue=p.marketValue||500000;
   p.marketValue=Math.round(parseFloat(input)*1000000);
   // الحفظ الذكي الموجه للاعب واحد فقط
   await saveSinglePlayer(p); 
@@ -2579,6 +2858,7 @@ async function refreshData() {
             id: p.player_id, name: p.name, pin: p.pin, photo: p.photo,
             tier: p.tier, stars: p.stars, stats: p.stats || {xp:0,points:0,trophies:0,goals:0}, 
             marketValue: p.market_value || 500000,
+            previousMarketValue: p.previous_market_value ?? null,
             status: p.status || 'active'
         }));
 
@@ -2668,6 +2948,7 @@ function updatePlayerMarketValue(db, pid, matchData) {
     if(!p) return;
     
     let val = p.marketValue || 500000; // Default starting price is 500k
+    p.previousMarketValue = val;
     
     // 1. Match Result Impact
     if(matchData.result === 'win') val += 100000;

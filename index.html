@@ -114,11 +114,31 @@
       <div style="font-size:10px;font-weight:700;letter-spacing:2px;color:var(--sub);text-transform:uppercase;margin-bottom:8px">📰 Latest News</div>
       <div id="news-feed" class="news-feed" style="padding:0;max-height:160px;overflow-y:auto"></div>
     </div>
+    <div style="padding:0 14px 10px">
+      <input type="text" id="arena-search" class="select-field" placeholder="🔎 Search tournaments..." oninput="renderArena()" style="margin-bottom:8px">
+      <div class="format-row" id="arena-filter-row">
+        <div class="f-opt sel" data-val="all" onclick="setArenaFilter(this)">All</div>
+        <div class="f-opt" data-val="active" onclick="setArenaFilter(this)">Live</div>
+        <div class="f-opt" data-val="ended" onclick="setArenaFilter(this)">Ended</div>
+        <div class="f-opt" data-val="archived" onclick="setArenaFilter(this)" id="arena-filter-archived" style="display:none">Archived</div>
+      </div>
+    </div>
     <div class="t-list" id="tournament-list"></div>
   </div>
 
   <!-- LOCKER TAB -->
-  <div id="tab-locker" class="tab-content"></div>
+  <div id="tab-locker" class="tab-content">
+    <div style="padding:14px 14px 0">
+      <input type="text" id="locker-search" class="select-field" placeholder="🔎 Search players..." oninput="renderLocker()" style="margin-bottom:8px">
+      <div class="format-row" id="locker-filter-row">
+        <div class="f-opt sel" data-val="all" onclick="setLockerFilter(this)">All</div>
+        <div class="f-opt" data-val="pro" onclick="setLockerFilter(this)">⭐ Pro</div>
+        <div class="f-opt" data-val="youth" onclick="setLockerFilter(this)">🌱 Youth</div>
+        <div class="f-opt" data-val="suspended" onclick="setLockerFilter(this)">🟥 Suspended</div>
+      </div>
+    </div>
+    <div id="locker-list-container"></div>
+  </div>
 
   <!-- HISTORY TAB -->
   <div id="tab-history" class="tab-content"></div>
@@ -126,8 +146,19 @@
   <!-- MARKET TAB -->
   <div id="tab-market" class="tab-content">
     <div class="sec-hdr"><div class="sec-ttl">💸 Transfer Market</div></div>
+    <div style="padding:0 14px 10px">
+      <input type="text" id="market-search" class="select-field" placeholder="🔎 Search players..." oninput="renderMarket()" style="margin-bottom:8px">
+      <div class="format-row" id="market-filter-row">
+        <div class="f-opt sel" data-val="all" onclick="setMarketFilter(this)">All</div>
+        <div class="f-opt" data-val="pro" onclick="setMarketFilter(this)">⭐ Pro</div>
+        <div class="f-opt" data-val="youth" onclick="setMarketFilter(this)">🌱 Youth</div>
+      </div>
+    </div>
     <div id="market-content"></div>
   </div>
+
+  <!-- DASHBOARD TAB (Admin Only) -->
+  <div id="tab-dashboard" class="tab-content"></div>
 
   <!-- VAR TAB -->
   <div id="tab-var" class="tab-content">
@@ -212,6 +243,7 @@
     <div class="nav-item" data-tab="locker" onclick="showTab('locker')"><div class="nav-ico">👕</div><div class="nav-lbl">Locker</div></div>
     <div class="nav-item" data-tab="history" onclick="showTab('history')"><div class="nav-ico">👑</div><div class="nav-lbl">Fame</div></div>
     <div class="nav-item" data-tab="market" onclick="showTab('market')"><div class="nav-ico">💸</div><div class="nav-lbl">Market</div></div>
+    <div class="nav-item" id="nav-dashboard" data-tab="dashboard" onclick="showTab('dashboard')" style="display:none"><div class="nav-ico">📊</div><div class="nav-lbl">Dash</div></div>
     <div class="nav-item" data-tab="var" onclick="showTab('var')"><div class="nav-ico">📋</div><div class="nav-lbl">VAR</div></div>
   </div>
 </div>
