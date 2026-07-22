@@ -708,8 +708,8 @@ function renderGroupConfig(){
       </div>
       <div style="font-size:11px;color:var(--sub);margin-top:4px">Home &amp; Away means every pair inside a group plays each other twice.</div>
     </div>
-    <button class="btn btn-ghost" style="margin-bottom:10px" onclick="autoDistributeGroups()">🔀 Distribute Players Randomly (starting point)</button>
-    <div style="font-size:11px;color:var(--sub);margin:-4px 0 10px">Then tap any group letter next to a player to move them into that exact group — build any mix of group sizes you want.</div>
+    <button class="btn btn-ghost" style="margin-bottom:10px" onclick="autoDistributeGroups()">🔀 Re-shuffle Randomly</button>
+    <div style="font-size:11px;color:var(--sub);margin:-4px 0 10px">Groups fill in automatically below — tap any group letter next to a player to move them into that exact group, building any mix of group sizes you want.</div>
     <div id="group-boxes"></div>
     <label style="font-size:12px;display:flex;align-items:center;gap:6px;margin:10px 0;color:var(--sub)">
       <input type="checkbox" id="auto-qualify-chk" ${cData.autoQualify?'checked':''} onchange="cData.autoQualify=this.checked">
@@ -719,7 +719,10 @@ function renderGroupConfig(){
     html=`<div style="font-size:12px;color:var(--sub);padding:6px 0">Select at least 4 players/teams above to configure groups.</div>`+html;
   }
   sec.innerHTML=html;
-  if(cData.groupAssign)renderGroupBoxes();
+  if(total>=4){
+    if(!cData.groupAssign)autoDistributeGroups(true);
+    else renderGroupBoxes();
+  }
 }
 function setLegs(n,el){
   cData.legs=n;
@@ -731,15 +734,16 @@ function setGroupCount(val){
   cData.groupCount=Math.max(2,Math.min(8,n));
   cData.groupAssign=null;cData.groupQualifiers=[];
   document.getElementById('group-boxes').innerHTML='';
+  if(participantCountForCreate()>=4)autoDistributeGroups(true);
 }
-function autoDistributeGroups(){
+function autoDistributeGroups(silent){
   const total=participantCountForCreate();
-  if(total<4){snack('⚠️ Select at least 4 players/teams first!');return}
-  if(cData.groupCount>=total){snack('⚠️ Too many groups for this number of players!');return}
+  if(total<4){if(!silent)snack('⚠️ Select at least 4 players/teams first!');return}
+  if(cData.groupCount>=total){if(!silent)snack('⚠️ Too many groups for this number of players!');return}
   const indices=[...Array(total).keys()].sort(()=>Math.random()-0.5);
   const groups=Array.from({length:cData.groupCount},()=>[]);
   indices.forEach((idx,i)=>groups[i%cData.groupCount].push(idx));
-  if(groups.some(g=>g.length<2)){snack('⚠️ Too many groups — some would have fewer than 2 players. Reduce group count.');return}
+  if(groups.some(g=>g.length<2)){if(!silent)snack('⚠️ Too many groups — some would have fewer than 2 players. Reduce group count.');return}
   cData.groupAssign=groups;
   cData.groupQualifiers=groups.map(g=>Math.min(2,g.length-1));
   renderGroupBoxes();
