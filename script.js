@@ -31,6 +31,7 @@ async function saveDB(db) {
         player_id: p.id, name: p.name, pin: p.pin, photo: p.photo,
         tier: p.tier, stars: p.stars, stats: p.stats, market_value: p.marketValue,
         previous_market_value: p.previousMarketValue ?? null,
+        market_value_history: p.marketValueHistory ?? [],
         status: p.status || 'active'
     }));
 
@@ -83,6 +84,7 @@ async function saveSinglePlayer(p) {
         player_id: p.id, name: p.name, pin: p.pin, photo: p.photo,
         tier: p.tier, stars: p.stars, stats: p.stats, market_value: p.marketValue,
         previous_market_value: p.previousMarketValue ?? null,
+        market_value_history: p.marketValueHistory ?? [],
         status: p.status || 'active'
     }, { onConflict: 'player_id' });
 }
@@ -109,6 +111,30 @@ function avHTML(p,size=46){
   const s=`width:${size}px;height:${size}px;font-size:${Math.round(size*0.32)}px`;
   return `<div class="pav" style="${s}">${p.photo?`<img src="${p.photo}" loading="lazy">`:`${initials(p.name)}`}</div>`
 }
+// ============================================================
+// HAPTICS — tiny helper, silently no-ops on devices/browsers
+// that don't support the Vibration API.
+// ============================================================
+function haptic(pattern=15){
+  try{ if(navigator.vibrate) navigator.vibrate(pattern); }catch(e){}
+}
+
+// ============================================================
+// RUNTIME TRANSITION STYLES — injected via JS so screen/tab
+// switches can fade smoothly without touching style.css.
+// ============================================================
+(function injectTransitionStyles(){
+  const style=document.createElement('style');
+  style.textContent=`
+    .screen.active{animation:fbFadeIn 0.28s ease}
+    .tab-content.active{animation:fbFadeIn 0.22s ease}
+    @keyframes fbFadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+    .skel{background:linear-gradient(90deg,rgba(255,255,255,0.04) 25%,rgba(255,255,255,0.09) 37%,rgba(255,255,255,0.04) 63%);background-size:400% 100%;animation:fbShimmer 1.4s ease infinite;border-radius:13px}
+    @keyframes fbShimmer{0%{background-position:100% 50%}100%{background-position:0% 50%}}
+  `;
+  document.head.appendChild(style);
+})();
+
 function showScreen(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById(id)?.classList.add('active')}
 
 // ============================================================
@@ -137,9 +163,10 @@ function showTab(tab){
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
   document.getElementById('tab-'+tab).classList.add('active');
   document.querySelector(`.nav-item[data-tab="${tab}"]`)?.classList.add('active');
+  haptic(8);
   renderTab(tab);
 }
-function showErr(id,msg){const el=document.getElementById(id);if(el){el.textContent=msg;el.classList.add('show')}}
+function showErr(id,msg){haptic(25);const el=document.getElementById(id);if(el){el.textContent=msg;el.classList.add('show')}}
 function hideErr(id){document.getElementById(id)?.classList.remove('show')}
 function snack(msg){const el=document.getElementById('snack');el.textContent=msg;el.classList.add('show');clearTimeout(snack._t);snack._t=setTimeout(()=>el.classList.remove('show'),2800)}
 
@@ -310,8 +337,65 @@ function enterApp(){
     showScreen('screen-app');
     renderUserBadge();
     showTab('arena');
-    // START MUSIC
-    if(bgMusic.paused) toggleMusic(); 
+    initPullToRefresh();
+    // START MUSIC — wait for the (now dynamic) playlist to finish loading
+    // from Supabase before trying to play anything.
+    loadPlaylist().then(list=>{ if(list.length && (!bgMusic || bgMusic.paused)) toggleMusic(); });
+}
+
+// ============================================================
+// PULL TO REFRESH — drag down from the top of any tab to sync.
+// Built at runtime (no index.html/style.css changes needed).
+// ============================================================
+function initPullToRefresh(){
+  const screen=document.getElementById('screen-app');
+  if(!screen||screen._ptrInit)return;
+  screen._ptrInit=true;
+  // Note: #screen-app already has position:absolute via style.css, which
+  // already establishes a containing block for our absolutely-positioned
+  // indicator below — no need to (and must not) override it here.
+
+  const indicator=document.createElement('div');
+  indicator.id='pull-refresh-indicator';
+  indicator.textContent='🔄';
+  indicator.style.cssText='position:absolute;top:0;left:50%;transform:translate(-50%,-40px);z-index:60;font-size:20px;pointer-events:none;opacity:0;filter:drop-shadow(0 2px 6px rgba(0,0,0,0.4))';
+  screen.prepend(indicator);
+
+  let startY=0,pulling=false,triggered=false;
+  const activeScrollTop=()=>document.querySelector('.tab-content.active')?.scrollTop||0;
+
+  screen.addEventListener('touchstart',e=>{
+    if(activeScrollTop()>0)return;
+    startY=e.touches[0].clientY;
+    pulling=true;triggered=false;
+  },{passive:true});
+
+  screen.addEventListener('touchmove',e=>{
+    if(!pulling)return;
+    const dy=e.touches[0].clientY-startY;
+    if(dy>0&&activeScrollTop()<=0){
+      const pull=Math.min(dy*0.5,80);
+      indicator.style.transform=`translate(-50%, ${pull-40}px) rotate(${pull*4}deg)`;
+      indicator.style.opacity=String(Math.min(pull/55,1));
+      if(pull>55&&!triggered){triggered=true;haptic(15);}
+    }
+  },{passive:true});
+
+  screen.addEventListener('touchend',()=>{
+    if(!pulling)return;
+    pulling=false;
+    if(triggered){
+      indicator.style.transition='transform 0.3s ease';
+      indicator.style.transform='translate(-50%, 14px) rotate(0deg)';
+      refreshData();
+    }
+    setTimeout(()=>{
+      indicator.style.transition='transform 0.25s ease, opacity 0.25s ease';
+      indicator.style.transform='translate(-50%,-40px)';
+      indicator.style.opacity='0';
+      setTimeout(()=>{indicator.style.transition='';},260);
+    },triggered?500:0);
+  },{passive:true});
 }
 function logout(){
   currentUser=null;
@@ -612,6 +696,47 @@ function setMarketFilter(el){
   el.classList.add('sel');
   marketFilterTier=el.dataset.val;
   renderMarket();
+}
+
+// ============================================================
+// ADVANCED SEARCH — level / market value / goals range filters,
+// shared between the Locker and Market screens.
+// ============================================================
+function toggleAdvFilters(scope){
+  const panel=document.getElementById(scope+'-adv-panel');
+  const btn=document.getElementById(scope+'-adv-toggle');
+  if(!panel||!btn)return;
+  const show=panel.style.display==='none';
+  panel.style.display=show?'block':'none';
+  btn.style.color=show?'var(--gold)':'var(--sub)';
+  btn.style.borderColor=show?'var(--gold)':'var(--border)';
+}
+function clearAdvFilters(scope){
+  ['lvl-min','lvl-max','val-min','val-max','goals-min','goals-max'].forEach(suf=>{
+    const el=document.getElementById(scope+'-'+suf);
+    if(el)el.value='';
+  });
+  if(scope==='locker')renderLocker();else renderMarket();
+}
+function getAdvRange(scope){
+  const num=id=>{const v=parseFloat(document.getElementById(id)?.value);return isNaN(v)?null:v;};
+  return{
+    lvlMin:num(scope+'-lvl-min'),lvlMax:num(scope+'-lvl-max'),
+    valMin:num(scope+'-val-min'),valMax:num(scope+'-val-max'),
+    goalsMin:num(scope+'-goals-min'),goalsMax:num(scope+'-goals-max')
+  };
+}
+function passesAdvFilter(p,range){
+  const lvl=getLevelFromXP(p.stats?.xp||0);
+  const valM=(p.marketValue||500000)/1000000;
+  const goals=p.stats?.goals||0;
+  if(range.lvlMin!=null&&lvl<range.lvlMin)return false;
+  if(range.lvlMax!=null&&lvl>range.lvlMax)return false;
+  if(range.valMin!=null&&valM<range.valMin)return false;
+  if(range.valMax!=null&&valM>range.valMax)return false;
+  if(range.goalsMin!=null&&goals<range.goalsMin)return false;
+  if(range.goalsMax!=null&&goals>range.goalsMax)return false;
+  return true;
 }
 
 function renderArena(){
@@ -1620,6 +1745,7 @@ async function saveMatch(){
   }
   if(t.bracket) updateBracket(t,aId,bId,goalsA,goalsB);
 
+  const matchResults={};
   Object.keys(matchEvents.goals).forEach(pid => {
       let g = matchEvents.goals[pid]; let card = matchEvents.cards[pid];
       let matchResult = 'draw';
@@ -1629,10 +1755,16 @@ async function saveMatch(){
       else if(isTeamA && goalsA < goalsB) matchResult = 'loss';
       else if(isTeamB && goalsB > goalsA) matchResult = 'win';
       else if(isTeamB && goalsB < goalsA) matchResult = 'loss';
+      matchResults[pid]=matchResult;
 
       updatePlayerMarketValue(db, pid, { result: matchResult, goals: g, card: card });
+      const p = db.players.find(x => x.id === pid);
+      if(p){
+          p.stats.matchesPlayed=(p.stats.matchesPlayed||0)+1;
+          if(matchResult==='win')p.stats.winStreak=(p.stats.winStreak||0)+1;
+          else{ p.stats.winStreak=0; if(matchResult==='loss')p.stats.totalLosses=(p.stats.totalLosses||0)+1; }
+      }
       if(g > 0 && card !== 'red') { 
-          const p = db.players.find(x => x.id === pid);
           if(p) { p.stats.goals = (p.stats.goals || 0) + g; awardXP(db, pid, g * 10); }
       }
   });
@@ -1667,7 +1799,7 @@ async function saveMatch(){
   const goalDiff = Math.abs(goalsA - goalsB);
   const headline = buildMatchHeadline(goalsA,goalsB,tA.name,tB.name,goalDiff);
   addNews(headline, '📰');
-  checkAchievements(db, matchEvents);
+  checkAchievements(db, matchEvents, matchResults);
   
   // 🛡️ حزام الأمان (Try/Catch) لمنع تجمد الزر
   try {
@@ -1971,10 +2103,22 @@ async function endCup(){
   });
   
   const winPids=t.type==='1v1'?[winner.id]:[winner.proId,winner.youthId].filter(Boolean);
-  winPids.forEach(pid=>{const p=db.players.find(x=>x.id===pid);if(!p)return;p.stats.trophies=(p.stats.trophies||0)+1;awardXP(db,pid,200);p.marketValue=(p.marketValue||500000)+500000;});
+  winPids.forEach(pid=>{const p=db.players.find(x=>x.id===pid);if(!p)return;p.stats.trophies=(p.stats.trophies||0)+1;awardXP(db,pid,200);p.marketValue=(p.marketValue||500000)+500000;recordMarketValueHistory(p);});
+
+  // 💎 Perfect Cup — champion went the entire tournament without a single loss
+  if((winner.L||0)===0){
+    winPids.forEach(pid=>{
+      const p=db.players.find(x=>x.id===pid);if(!p)return;
+      p.stats.badges=p.stats.badges||[];
+      if(!p.stats.badges.includes('💎 Perfect Cup (Unbeaten Champion)')){
+        p.stats.badges.push('💎 Perfect Cup (Unbeaten Champion)');
+        addNews(`💎 PERFECT CUP: ${p.name} won "${t.name}" without a single loss!`,'💎');
+      }
+    });
+  }
   
   let bootNames=[];
-  topScorerIds.forEach(pid=>{const p=db.players.find(x=>x.id===pid);if(p){p.stats.goldenBoots=(p.stats.goldenBoots||0)+1;awardXP(db,pid,100);p.marketValue=(p.marketValue||500000)+300000;bootNames.push(p.name);}});
+  topScorerIds.forEach(pid=>{const p=db.players.find(x=>x.id===pid);if(p){p.stats.goldenBoots=(p.stats.goldenBoots||0)+1;awardXP(db,pid,100);p.marketValue=(p.marketValue||500000)+300000;recordMarketValueHistory(p);bootNames.push(p.name);}});
   
   t.status='ended';
   addNews(`🏆 "${t.name}" ended! Winner: ${winner.name}! 🎉`,'🏆');
@@ -2203,6 +2347,7 @@ async function editLastMatch(){
 }
 
 function showWinnerCelebration(winner,t,db){
+  haptic([30,60,30,60,80]);
   const p = (t.type === '1v1') ? db.players.find(x=>x.id===winner.id) : null;
   const avEl=document.getElementById('winner-avatar');
   if(p?.photo)avEl.innerHTML=`<img src="${p.photo}" style="width:100%;height:100%;object-fit:cover">`;
@@ -2275,6 +2420,7 @@ function renderLocker(){
   }
 
   const searchTerm=(document.getElementById('locker-search')?.value||'').trim().toLowerCase();
+  const advRange=getAdvRange('locker');
   let shownCount=0;
   let rosterHtml='';
   db.players.forEach((p,i)=>{
@@ -2285,6 +2431,7 @@ function renderLocker(){
       if(lockerFilterTier==='pro' && p.tier!=='pro') return;
       if(lockerFilterTier==='youth' && p.tier!=='youth') return;
       if(lockerFilterTier==='suspended' && p.status!=='suspended') return;
+      if(!passesAdvFilter(p,advRange)) return;
       rosterHtml += createCard(p, i, false);
       shownCount++;
   });
@@ -2355,10 +2502,11 @@ async function approvePlayer(idx){
       return;
   }
   
+  const startHistory=[{ts:Date.now(),value:500000}];
   const newPlayer = {
       player_id: id, name: req.name, pin: req.pin, photo: req.photo||'', 
       tier: 'youth', stars: 0, stats: {xp:0,points:0,trophies:0,goals:0}, 
-      market_value: 500000, status: 'active'
+      market_value: 500000, status: 'active', market_value_history: startHistory
   };
 
   try {
@@ -2370,7 +2518,7 @@ async function approvePlayer(idx){
       await supabaseClient.from('pending_requests').delete().eq('username', id);
 
       // 3. Update Local UI safely
-      db.players.push({id:id, name:req.name, pin:req.pin, photo:req.photo||'', tier:'youth', stars:0, stats:{xp:0,points:0,trophies:0,goals:0}, marketValue:500000, status: 'active'});
+      db.players.push({id:id, name:req.name, pin:req.pin, photo:req.photo||'', tier:'youth', stars:0, stats:{xp:0,points:0,trophies:0,goals:0}, marketValue:500000, marketValueHistory:startHistory, status: 'active'});
       db.pending.splice(idx,1);
       
       addNews(`✅ ${req.name} joined! Username: ${id}`,'👋');
@@ -2512,6 +2660,43 @@ async function adminUpdatePhoto(idx){
 }
 
 // ============================================================
+// MARKET VALUE SPARKLINE — lightweight inline SVG line chart,
+// no external chart library needed.
+// ============================================================
+function renderMarketValueSparkline(history){
+  const pts=(history||[]).slice(-15);
+  if(pts.length<2){
+    return `<div style="font-size:11px;color:var(--sub);padding:6px 0">Not enough history yet — the curve builds up as this player's value changes over time.</div>`;
+  }
+  const vals=pts.map(h=>h.value);
+  const min=Math.min(...vals), max=Math.max(...vals);
+  const range=(max-min)||1;
+  const W=280,H=64,PAD=6;
+  const stepX=pts.length>1?(W-PAD*2)/(pts.length-1):0;
+  const coords=pts.map((h,i)=>{
+    const x=PAD+i*stepX;
+    const y=PAD+(1-(h.value-min)/range)*(H-PAD*2);
+    return{x,y,value:h.value};
+  });
+  const linePts=coords.map(c=>`${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
+  const areaPts=`${PAD.toFixed(1)},${(H-PAD).toFixed(1)} ${linePts} ${(W-PAD).toFixed(1)},${(H-PAD).toFixed(1)}`;
+  const dots=coords.map((c,i)=>`<circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="${i===coords.length-1?3.5:2}" fill="${i===coords.length-1?'var(--gold)':'#ffd166'}"/>`).join('');
+  const fmt=v=>v>=1000000?`€${(v/1000000).toFixed(2)}M`:`€${(v/1000).toFixed(0)}K`;
+  return `
+    <svg width="100%" viewBox="0 0 ${W} ${H}" style="display:block;overflow:visible">
+      <polygon points="${areaPts}" fill="url(#mvGrad)" opacity="0.15"/>
+      <polyline points="${linePts}" fill="none" stroke="var(--gold)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+      ${dots}
+      <defs><linearGradient id="mvGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="var(--gold)"/><stop offset="100%" stop-color="var(--gold)" stop-opacity="0"/>
+      </linearGradient></defs>
+    </svg>
+    <div style="display:flex;justify-content:space-between;margin-top:4px;font-size:10px;color:var(--sub);font-weight:600">
+      <span>${fmt(coords[0].value)}</span><span style="color:var(--gold)">${fmt(coords[coords.length-1].value)}</span>
+    </div>`;
+}
+
+// ============================================================
 // PLAYER PROFILE WITH PERFORMANCE GRAPH
 // ============================================================
 function openProfile(idx,canEdit=false){
@@ -2523,7 +2708,7 @@ function openProfile(idx,canEdit=false){
   const avgRating=getPlayerAvgRating(p.id,db);
   const formHTML=getPlayerForm(p.id,db);
 
-  // --- ENGINE UPGRADE: Calculate Graph Data ---
+  // --- ENGINE UPGRADE: Calculate Graph Data (now carries opponent/score/tournament too) ---
   const playerMatches = [];
   db.tournaments.forEach(t => {
       (t.matches || []).forEach(m => {
@@ -2531,8 +2716,9 @@ function openProfile(idx,canEdit=false){
               if(m.aId === p.id || m.bId === p.id) {
                   const myGoals = m.aId === p.id ? m.goalsA : m.goalsB;
                   const oppGoals = m.aId === p.id ? m.goalsB : m.goalsA;
+                  const oppName = m.aId === p.id ? m.teamB : m.teamA;
                   const result = myGoals>oppGoals?'W':(myGoals<oppGoals?'L':'D');
-                  playerMatches.push({ goals: myGoals, ts: m.ts, result });
+                  playerMatches.push({ goals: myGoals, ts: m.ts, result, oppName, myGoals, oppGoals, tName:t.name });
               }
           } else {
               // 2v2 check
@@ -2543,7 +2729,10 @@ function openProfile(idx,canEdit=false){
                   const result = onTeamA
                     ? (m.goalsA>m.goalsB?'W':(m.goalsA<m.goalsB?'L':'D'))
                     : (m.goalsB>m.goalsA?'W':(m.goalsB<m.goalsA?'L':'D'));
-                  playerMatches.push({ goals: myGoals, ts: m.ts, result });
+                  const oppName = onTeamA ? m.teamB : m.teamA;
+                  const myGoalsScore = onTeamA ? m.goalsA : m.goalsB;
+                  const oppGoalsScore = onTeamA ? m.goalsB : m.goalsA;
+                  playerMatches.push({ goals: myGoals, ts: m.ts, result, oppName, myGoals:myGoalsScore, oppGoals:oppGoalsScore, tName:t.name });
               }
           }
       });
@@ -2555,7 +2744,7 @@ function openProfile(idx,canEdit=false){
   const winRate=totalMatches?Math.round((wins/totalMatches)*100):0;
   const avgGoalsPerMatch=totalMatches?(playerMatches.reduce((sum,m)=>sum+m.goals,0)/totalMatches).toFixed(1):'0.0';
   
-  // Sort oldest to newest, get the last 5 matches
+  // Sort oldest to newest, get the last 5 matches for the goals bar chart
   playerMatches.sort((a,b) => a.ts - b.ts);
   const last5 = playerMatches.slice(-5);
   
@@ -2578,6 +2767,49 @@ function openProfile(idx,canEdit=false){
   }
   graphHtml += `</div>`;
   // ---------------------------------------------
+
+  // --- LAST 20 MATCHES LIST (newest first) ---
+  const last20 = [...playerMatches].reverse().slice(0,20);
+  const last20Html = last20.length===0
+    ? `<div style="font-size:12px;color:var(--sub);padding:10px 0;text-align:center">No matches recorded yet.</div>`
+    : last20.map(m=>{
+        const resColor = m.result==='W'?'var(--green)':m.result==='L'?'var(--red)':'var(--sub)';
+        const resLabel = m.result==='W'?'WIN':m.result==='L'?'LOSS':'DRAW';
+        return `<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)">
+          <div style="width:5px;height:28px;border-radius:3px;background:${resColor};flex-shrink:0"></div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">vs ${m.oppName||'?'}</div>
+            <div style="font-size:10px;color:var(--sub);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${m.tName||''} · ${timeAgo(m.ts)}</div>
+          </div>
+          <div style="text-align:right;flex-shrink:0">
+            <div style="font-family:'Bebas Neue',sans-serif;font-size:16px;color:var(--gold)">${m.myGoals}–${m.oppGoals}</div>
+            <div style="font-size:9px;font-weight:700;color:${resColor};letter-spacing:0.5px">${resLabel}</div>
+          </div>
+        </div>`;
+      }).join('');
+
+  // --- ALL TOURNAMENTS THIS PLAYER HAS PLAYED IN ---
+  const playerTournaments = db.tournaments.filter(t=>{
+    if(t.type==='1v1') return t.standings.some(s=>s.id===p.id);
+    return t.standings.some(s=>s.proId===p.id||s.youthId===p.id);
+  });
+  const tournamentsHtml = playerTournaments.length===0
+    ? `<div style="font-size:12px;color:var(--sub);padding:10px 0;text-align:center">Hasn't joined any tournament yet.</div>`
+    : playerTournaments.map(t=>{
+        const entry = t.type==='1v1' ? t.standings.find(s=>s.id===p.id) : t.standings.find(s=>s.proId===p.id||s.youthId===p.id);
+        const statusBadge = t.archivedAt
+          ? `<span style="font-size:9px;background:rgba(90,90,138,0.15);color:var(--sub);padding:2px 7px;border-radius:6px;font-weight:700">📦 ARCHIVED</span>`
+          : t.status==='ended'
+          ? `<span style="font-size:9px;background:rgba(90,90,138,0.15);color:var(--sub);padding:2px 7px;border-radius:6px;font-weight:700">ENDED</span>`
+          : `<span style="font-size:9px;background:rgba(6,215,123,0.15);color:var(--green);padding:2px 7px;border-radius:6px;font-weight:700">● LIVE</span>`;
+        return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 0;border-bottom:1px solid var(--border)">
+          <div style="min-width:0">
+            <div style="font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.name}</div>
+            <div style="font-size:10px;color:var(--sub);margin-top:2px">${entry?`${entry.W}W-${entry.D}D-${entry.L}L · ${entry.PTS} PTS`:''}</div>
+          </div>
+          ${statusBadge}
+        </div>`;
+      }).join('');
 
   const badgesHtml = (s.badges && s.badges.length > 0) 
       ? s.badges.map(b => `<div style="display:inline-block; background:rgba(240,180,41,0.1); border:1px solid var(--gold); border-radius:8px; padding:4px 8px; font-size:11px; margin:2px; font-weight:700; color:var(--gold)">${b}</div>`).join('') 
@@ -2639,8 +2871,21 @@ function openProfile(idx,canEdit=false){
 
     <div style="margin-top:14px;padding:14px;background:var(--card);border-radius:12px;border:1px solid var(--border)">
       <div style="font-size:10px;font-weight:700;letter-spacing:1.5px;color:var(--sub);margin-bottom:8px">MARKET VALUE</div>
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:28px;color:var(--gold)">€${((p.marketValue||500000)/1000000).toFixed(2)}M</div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:28px;color:var(--gold);margin-bottom:8px">€${((p.marketValue||500000)/1000000).toFixed(2)}M</div>
+      <div style="font-size:9px;font-weight:700;letter-spacing:1.5px;color:var(--sub);margin-bottom:6px">VALUE OVER TIME</div>
+      ${renderMarketValueSparkline(p.marketValueHistory)}
     </div>
+
+    <div class="settings-card" style="margin-top:14px">
+      <div class="settings-title" style="font-size:11px">🏟️ Tournaments (${playerTournaments.length})</div>
+      <div style="max-height:220px;overflow-y:auto">${tournamentsHtml}</div>
+    </div>
+
+    <div class="settings-card" style="margin-top:14px">
+      <div class="settings-title" style="font-size:11px">📝 Last 20 Matches</div>
+      <div style="max-height:320px;overflow-y:auto">${last20Html}</div>
+    </div>
+
     ${canEdit?`<button class="btn btn-ghost" style="margin-top:14px" onclick="openEditSelfProfile(${idx})">✏️ Edit My Profile</button>`:''}`;
     
   document.getElementById('modal-profile').classList.add('active');
@@ -2721,11 +2966,108 @@ async function selfUpdatePin(idx){
 // ============================================================
 // HALL OF FAME
 // ============================================================
+// ============================================================
+// LEAGUE RECORDS ENGINE — most wins, goals, MOTM, team wins,
+// longest win streak, and global average goals per match.
+// ============================================================
+function computeLeagueRecords(db){
+  const players=db.players.filter(p=>p.status!=='banned');
+  const winsCount={},motmCount={},teamWins={};
+  let totalGoalsAll=0,totalMatchesAll=0;
+
+  db.tournaments.forEach(t=>{
+    (t.matches||[]).forEach(m=>{
+      totalGoalsAll+=(m.goalsA||0)+(m.goalsB||0);
+      totalMatchesAll++;
+      if(m.motm)motmCount[m.motm]=(motmCount[m.motm]||0)+1;
+      if(t.type==='1v1'){
+        if(m.goalsA>m.goalsB)winsCount[m.aId]=(winsCount[m.aId]||0)+1;
+        else if(m.goalsB>m.goalsA)winsCount[m.bId]=(winsCount[m.bId]||0)+1;
+      } else {
+        const tA=t.standings.find(s=>s.id===m.aId),tB=t.standings.find(s=>s.id===m.bId);
+        if(m.goalsA>m.goalsB&&tA){
+          winsCount[tA.proId]=(winsCount[tA.proId]||0)+1;winsCount[tA.youthId]=(winsCount[tA.youthId]||0)+1;
+          teamWins[tA.id]=teamWins[tA.id]||{count:0,name:tA.name};teamWins[tA.id].count++;
+        } else if(m.goalsB>m.goalsA&&tB){
+          winsCount[tB.proId]=(winsCount[tB.proId]||0)+1;winsCount[tB.youthId]=(winsCount[tB.youthId]||0)+1;
+          teamWins[tB.id]=teamWins[tB.id]||{count:0,name:tB.name};teamWins[tB.id].count++;
+        }
+      }
+    });
+  });
+
+  let mostWins=null,bwc=0;
+  Object.entries(winsCount).forEach(([pid,c])=>{if(c>bwc){bwc=c;const p=players.find(x=>x.id===pid);if(p)mostWins={name:p.name,count:c};}});
+
+  let mostGoals=null,bgc=0;
+  players.forEach(p=>{const g=p.stats?.goals||0;if(g>bgc){bgc=g;mostGoals={name:p.name,count:g};}});
+
+  let mostMotm=null,bmc=0;
+  Object.entries(motmCount).forEach(([name,c])=>{if(c>bmc){bmc=c;mostMotm={name,count:c};}});
+
+  let mostTeamWins=null,btc=0;
+  Object.values(teamWins).forEach(tw=>{if(tw.count>btc){btc=tw.count;mostTeamWins={name:tw.name,count:tw.count};}});
+
+  let longestStreak=null,bsc=0;
+  players.forEach(p=>{
+    const matches=[];
+    db.tournaments.forEach(t=>{
+      (t.matches||[]).forEach(m=>{
+        if(t.type==='1v1'){
+          if(m.aId===p.id||m.bId===p.id){
+            const won=(m.aId===p.id&&m.goalsA>m.goalsB)||(m.bId===p.id&&m.goalsB>m.goalsA);
+            matches.push({ts:m.ts,won});
+          }
+        } else if(m.events&&m.events.goals&&m.events.goals[p.id]!==undefined){
+          const tA=t.standings.find(s=>s.id===m.aId),tB=t.standings.find(s=>s.id===m.bId);
+          const onA=tA&&(tA.proId===p.id||tA.youthId===p.id);
+          const won=onA?m.goalsA>m.goalsB:m.goalsB>m.goalsA;
+          matches.push({ts:m.ts,won});
+        }
+      });
+    });
+    matches.sort((a,b)=>a.ts-b.ts);
+    let cur=0,max=0;
+    matches.forEach(m=>{if(m.won){cur++;max=Math.max(max,cur);}else cur=0;});
+    if(max>bsc){bsc=max;longestStreak={name:p.name,count:max};}
+  });
+
+  const avgGoalsPerMatch=totalMatchesAll?(totalGoalsAll/totalMatchesAll).toFixed(2):'0.00';
+  return{mostWins,mostGoals,mostMotm,mostTeamWins,longestStreak,avgGoalsPerMatch};
+}
+
+function renderLeagueRecords(db){
+  const r=computeLeagueRecords(db);
+  const cell=(icon,label,data,color)=>`<div class="stat-cell" style="padding:12px 8px;text-align:left${color?`;border-color:${color}`:''}">
+    <div style="font-size:9px;font-weight:700;letter-spacing:1px;color:var(--sub);text-transform:uppercase;margin-bottom:4px">${icon} ${label}</div>
+    <div style="font-size:14px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${data?data.name:'—'}</div>
+    ${data?`<div style="font-size:11px;color:${color||'var(--sub)'};font-weight:700;margin-top:1px">${data.count}</div>`:''}
+  </div>`;
+  return `<div class="settings-card" style="margin:0 14px 14px">
+    <div class="settings-title" style="font-size:11px">🏅 League Records</div>
+    <div class="stat-grid" style="grid-template-columns:1fr 1fr;gap:8px">
+      ${cell('🔥','Most Wins',r.mostWins,'var(--green)')}
+      ${cell('⚽','Top Scorer',r.mostGoals,'var(--gold)')}
+      ${cell('⭐','Most MOTM',r.mostMotm,'var(--purple)')}
+      ${cell('👯','Best Duo',r.mostTeamWins,'var(--blue)')}
+      ${cell('📈','Longest Win Streak',r.longestStreak,'var(--green)')}
+    </div>
+    <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+      <span style="font-size:11px;color:var(--sub);font-weight:700">⚽ Avg Goals / Match (all-time)</span>
+      <span style="font-family:'Bebas Neue',sans-serif;font-size:18px;color:var(--gold)">${r.avgGoalsPerMatch}</span>
+    </div>
+  </div>`;
+}
+
 function renderHistory(){
   const db=getDB();const el=document.getElementById('tab-history');
   const sorted=[...db.players].sort((a,b)=>{const eloA=a.stats?.elo||1000,eloB=b.stats?.elo||1000;if(eloB!==eloA)return eloB-eloA;return(b.stats?.points||0)-(a.stats?.points||0);});
   if(sorted.length===0){el.innerHTML=`<div class="empty-state"><div class="empty-ico">🏛️</div><div class="empty-txt">Hall of Fame is empty.<br>Complete a tournament to fill it.</div></div>`;return;}
-  el.innerHTML=`<div class="sec-hdr"><div class="sec-ttl">👑 Hall of Fame (Global Rank)</div></div><div class="hof-list">
+  el.innerHTML=`<div class="sec-hdr"><div class="sec-ttl">👑 Hall of Fame (Global Rank)</div>
+    <button onclick="openCompareModal()" style="display:flex;align-items:center;gap:4px;background:rgba(240,180,41,0.1);border:1px solid rgba(240,180,41,0.25);border-radius:9px;padding:7px 13px;font-family:'Rajdhani',sans-serif;font-size:12px;font-weight:700;color:var(--gold);cursor:pointer">⚖️ COMPARE</button>
+  </div>
+  ${renderLeagueRecords(db)}
+  <div class="hof-list">
     ${sorted.map((p,i)=>{
       const s=p.stats||{};const xp=s.xp||0;const lvl=getLevelFromXP(xp);const lvlTitle=getLevelTitle(lvl);const elo=s.elo||1000;const pIdx=db.players.indexOf(p);
       return`<div class="hof-item ${i===0?'r1':''}" onclick="openProfile(${pIdx},false)">
@@ -2746,6 +3088,78 @@ function renderHistory(){
 }
 
 // ============================================================
+// PLAYER COMPARISON
+// ============================================================
+function playerTournamentCount(pid,db){
+  return db.tournaments.filter(t=>t.type==='1v1'?t.standings.some(s=>s.id===pid):t.standings.some(s=>s.proId===pid||s.youthId===pid)).length;
+}
+function computeWinRateQuick(pid,db){
+  let total=0,wins=0;
+  db.tournaments.forEach(t=>{
+    (t.matches||[]).forEach(m=>{
+      if(t.type==='1v1'){
+        if(m.aId===pid||m.bId===pid){
+          total++;
+          if((m.aId===pid&&m.goalsA>m.goalsB)||(m.bId===pid&&m.goalsB>m.goalsA))wins++;
+        }
+      } else if(m.events&&m.events.goals&&m.events.goals[pid]!==undefined){
+        const tA=t.standings.find(s=>s.id===m.aId),tB=t.standings.find(s=>s.id===m.bId);
+        const onA=tA&&(tA.proId===pid||tA.youthId===pid);
+        total++;
+        if(onA?m.goalsA>m.goalsB:m.goalsB>m.goalsA)wins++;
+      }
+    });
+  });
+  return total?Math.round((wins/total)*100):0;
+}
+function openCompareModal(){
+  const db=getDB();
+  const eligible=db.players.filter(p=>p.status!=='banned');
+  const opts=eligible.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+  document.getElementById('compare-body').innerHTML=`
+    <div class="field"><label>Player 1</label><select id="cmp-a" class="select-field" onchange="renderCompareResult()"><option value="">— Select —</option>${opts}</select></div>
+    <div class="field"><label>Player 2</label><select id="cmp-b" class="select-field" onchange="renderCompareResult()"><option value="">— Select —</option>${opts}</select></div>
+    <div id="compare-result"></div>`;
+  document.getElementById('modal-compare').classList.add('active');
+}
+function renderCompareResult(){
+  const db=getDB();
+  const aId=document.getElementById('cmp-a').value;
+  const bId=document.getElementById('cmp-b').value;
+  const res=document.getElementById('compare-result');
+  if(!aId||!bId){res.innerHTML='';return}
+  if(aId===bId){res.innerHTML='<div style="font-size:12px;color:var(--red);text-align:center;padding:10px 0">Pick two different players.</div>';return}
+  const a=db.players.find(x=>x.id===aId),b=db.players.find(x=>x.id===bId);
+  if(!a||!b)return;
+  const metrics=[
+    {label:'Market Value',raw:p=>p.marketValue||500000,fmt:v=>v>=1000000?`€${(v/1000000).toFixed(2)}M`:`€${(v/1000).toFixed(0)}K`},
+    {label:'Goals',raw:p=>p.stats?.goals||0,fmt:v=>v},
+    {label:'Tournaments',raw:p=>playerTournamentCount(p.id,db),fmt:v=>v},
+    {label:'Win Rate',raw:p=>computeWinRateQuick(p.id,db),fmt:v=>v+'%'},
+    {label:'XP',raw:p=>p.stats?.xp||0,fmt:v=>v},
+    {label:'Level',raw:p=>getLevelFromXP(p.stats?.xp||0),fmt:v=>v},
+    {label:'ELO',raw:p=>p.stats?.elo||1000,fmt:v=>v},
+    {label:'Trophies 🏆',raw:p=>p.stats?.trophies||0,fmt:v=>v},
+  ];
+  res.innerHTML=`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 12px">
+      <div style="text-align:center;flex:1"><div class="pav" style="width:52px;height:52px;margin:0 auto 6px;font-size:16px">${a.photo?`<img src="${a.photo}">`:initials(a.name)}</div><div style="font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${a.name}</div></div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:20px;color:var(--sub);flex-shrink:0;padding:0 8px">VS</div>
+      <div style="text-align:center;flex:1"><div class="pav" style="width:52px;height:52px;margin:0 auto 6px;font-size:16px">${b.photo?`<img src="${b.photo}">`:initials(b.name)}</div><div style="font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${b.name}</div></div>
+    </div>
+    ${metrics.map(m=>{
+      const va=m.raw(a),vb=m.raw(b);
+      const aBetter=va>vb,bBetter=vb>va;
+      return `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 4px;border-bottom:1px solid var(--border)">
+        <span style="flex:1;text-align:center;font-weight:800;font-size:13px;color:${aBetter?'var(--green)':'var(--text)'}">${m.fmt(va)}</span>
+        <span style="width:100px;text-align:center;font-size:9px;color:var(--sub);letter-spacing:0.5px;text-transform:uppercase;flex-shrink:0">${m.label}</span>
+        <span style="flex:1;text-align:center;font-weight:800;font-size:13px;color:${bBetter?'var(--green)':'var(--text)'}">${m.fmt(vb)}</span>
+      </div>`;
+    }).join('')}
+    <div style="font-size:10px;color:var(--sub);text-align:center;margin-top:12px">⚠️ Speed rating isn't tracked in the app yet.</div>`;
+}
+
+// ============================================================
 // TRANSFER MARKET
 // ============================================================
 function renderMarket(){
@@ -2760,10 +3174,12 @@ function renderMarket(){
   const totalStr=totalValue>=1000000?`€${(totalValue/1000000).toFixed(2)}M`:`€${(totalValue/1000).toFixed(0)}K`;
 
   const searchTerm=(document.getElementById('market-search')?.value||'').trim().toLowerCase();
+  const advRange=getAdvRange('market');
   let sorted=allSorted;
   if(searchTerm)sorted=sorted.filter(p=>p.name.toLowerCase().includes(searchTerm));
   if(marketFilterTier==='pro')sorted=sorted.filter(p=>p.tier==='pro');
   else if(marketFilterTier==='youth')sorted=sorted.filter(p=>p.tier!=='pro');
+  sorted=sorted.filter(p=>passesAdvFilter(p,advRange));
 
   // 🔥 Top Risers — players whose value went up since the last change
   const risers=[...db.players]
@@ -2821,6 +3237,7 @@ async function adjustValue(pid){
   if(!input||isNaN(parseFloat(input)))return;
   p.previousMarketValue=p.marketValue||500000;
   p.marketValue=Math.round(parseFloat(input)*1000000);
+  recordMarketValueHistory(p);
   // الحفظ الذكي الموجه للاعب واحد فقط
   await saveSinglePlayer(p); 
   localStorage.setItem(DB_KEY, JSON.stringify(db));
@@ -2832,6 +3249,7 @@ async function adjustValue(pid){
 // GOAL ANIMATION
 // ============================================================
 function showGoalAnimation(scoreText){
+  haptic([20,40,20]);
   const ov=document.getElementById('goal-overlay');
   const txt=document.getElementById('goal-text');
   const parts=document.getElementById('goal-particles');
@@ -2855,7 +3273,25 @@ function showGoalAnimation(scoreText){
 // ============================================================
 // REFRESH SYSTEM (HIGH-SPEED PARALLEL FETCH)
 // ============================================================
+// SKELETON LOADING — quick shimmer placeholders shown the moment
+// a refresh starts, swapped out automatically once the real
+// render*() functions run and overwrite the container.
+// ============================================================
+function renderSkeleton(elId,count=4){
+  const el=document.getElementById(elId);if(!el)return;
+  _renderCache.delete(el);
+  el.innerHTML=Array.from({length:count},()=>`<div class="skel" style="height:74px;margin:0 14px 12px"></div>`).join('');
+}
+function showSkeletonForActiveTab(){
+  const activeTab=document.querySelector('.nav-item.active')?.dataset.tab||'arena';
+  const map={arena:'tournament-list',locker:'locker-list-container',market:'market-content'};
+  const id=map[activeTab];
+  if(id)renderSkeleton(id, activeTab==='market'?5:4);
+}
+
+// ============================================================
 async function refreshData() {
+    showSkeletonForActiveTab();
     snack('🔄 Syncing live data...'); 
     try {
         const [pRes, tRes, nRes, pendRes, admRes] = await Promise.all([
@@ -2874,6 +3310,7 @@ async function refreshData() {
             tier: p.tier, stars: p.stars, stats: p.stats || {xp:0,points:0,trophies:0,goals:0}, 
             marketValue: p.market_value || 500000,
             previousMarketValue: p.previous_market_value ?? null,
+            marketValueHistory: p.market_value_history ?? [],
             status: p.status || 'active'
         }));
 
@@ -2956,8 +3393,16 @@ function updateELO(db, teamA_Ids, teamB_Ids, resultA) {
 }
 
 // ============================================================
-// DYNAMIC MARKET VALUE ENGINE
+// MARKET VALUE HISTORY — keeps a capped timeline of value changes
+// per player so the profile can draw a real historical curve.
 // ============================================================
+function recordMarketValueHistory(p){
+    if(!p)return;
+    p.marketValueHistory=p.marketValueHistory||[];
+    p.marketValueHistory.push({ts:Date.now(),value:p.marketValue});
+    if(p.marketValueHistory.length>60)p.marketValueHistory=p.marketValueHistory.slice(-60);
+}
+
 function updatePlayerMarketValue(db, pid, matchData) {
     const p = db.players.find(x => x.id === pid);
     if(!p) return;
@@ -2981,49 +3426,87 @@ function updatePlayerMarketValue(db, pid, matchData) {
     if(val < 100000) val = 100000;
     
     p.marketValue = val;
+    recordMarketValueHistory(p);
 }
 
 function awardMotmValue(db, pid) {
     const p = db.players.find(x => x.id === pid);
     if(p) {
         p.marketValue = (p.marketValue || 500000) + 200000; // MOTM gets +200k bonus
+        recordMarketValueHistory(p);
     }
 }
 
-// FIFA-STYLE MUSIC ENGINE (Your Custom Playlist)
+// FIFA-STYLE MUSIC ENGINE — playlist now loads dynamically straight
+// from the Supabase Storage bucket instead of a hardcoded list, so
+// any track uploaded/removed there in the future shows up automatically
+// with zero code changes, and dead files (deleted from the bucket) never
+// end up stuck in the code.
 // ============================================================
-const playlist = [
-    "https://jvkjjpqlmofprmugkbxs.supabase.co/storage/v1/object/public/music/Untitled%20folder/YTDown_YouTube_Bad-Bunny-DtMF-Letra_Media_4X4uckVyk9o_009_128k.mp3",
-    "https://jvkjjpqlmofprmugkbxs.supabase.co/storage/v1/object/public/music/Untitled%20folder/YTDown_YouTube_Hayya-Hayya-Better-Together-FIFA-World-C_Media_vyDjFVZgJoo_009_128k.mp3",
-    "https://jvkjjpqlmofprmugkbxs.supabase.co/storage/v1/object/public/music/Untitled%20folder/YTDown_YouTube_IShowSpeed-World-Cup-Official-Music-Vide_Media_8n5dJwWXrbo_009_128k.mp3",
-    "https://jvkjjpqlmofprmugkbxs.supabase.co/storage/v1/object/public/music/Untitled%20folder/YTDown_YouTube_Travis-Scott-STARGAZING-Audio_Media_2a8PgqWrc_4_009_128k.mp3"
-];
+const MUSIC_BUCKET='music';
+const MUSIC_FOLDER='Untitled folder';
+let playlist=[];
+let playlistLoaded=false;
+let playlistLoadingPromise=null;
+let currentSong=0;
+let bgMusic=null;
 
-let currentSong = 0;
-let bgMusic = new Audio(playlist[currentSong]);
-bgMusic.volume = 0.2; // Background volume (20%)
+async function loadPlaylist(){
+    if(playlistLoaded)return playlist;
+    if(playlistLoadingPromise)return playlistLoadingPromise;
+    playlistLoadingPromise=(async()=>{
+        try{
+            const{data,error}=await supabaseClient.storage.from(MUSIC_BUCKET).list(MUSIC_FOLDER,{limit:200,sortBy:{column:'name',order:'asc'}});
+            if(error)throw error;
+            const audioExt=/\.(mp3|wav|m4a|ogg|aac)$/i;
+            playlist=(data||[])
+                .filter(f=>f&&f.name&&f.id&&audioExt.test(f.name)) // f.id is null for sub-folder placeholders
+                .map(f=>supabaseClient.storage.from(MUSIC_BUCKET).getPublicUrl(`${MUSIC_FOLDER}/${f.name}`).data.publicUrl);
+            playlistLoaded=true;
+        }catch(e){
+            console.error('Playlist load failed',e);
+            playlist=[];
+        }
+        return playlist;
+    })();
+    return playlistLoadingPromise;
+}
 
-// Auto-play next song when current finishes
-bgMusic.addEventListener('ended', nextSong);
+function initMusicPlayer(list){
+    if(!list.length)return;
+    currentSong=0;
+    bgMusic=new Audio(list[currentSong]);
+    bgMusic.volume=0.2;
+    bgMusic.addEventListener('ended',nextSong);
+}
 
-function toggleMusic() {
-    if(bgMusic.paused) {
-        bgMusic.play().catch(e => console.log("Browser blocked autoplay until user clicks"));
-        document.getElementById('music-btn').textContent = '🔊';
-    } else {
+// FIX: this used to try playing bgMusic the instant the app opened,
+// before the (now-dynamic) playlist had even loaded — a silent failure
+// that could interfere with the login flow. It now always waits for the
+// playlist to finish loading before doing anything.
+async function toggleMusic(){
+    const list=await loadPlaylist();
+    if(!list.length){snack('🎵 No music tracks found.');return;}
+    if(!bgMusic)initMusicPlayer(list);
+    if(bgMusic.paused){
+        bgMusic.play().catch(e=>console.log("Browser blocked autoplay until user clicks"));
+        document.getElementById('music-btn').textContent='🔊';
+    }else{
         bgMusic.pause();
-        document.getElementById('music-btn').textContent = '🔇';
+        document.getElementById('music-btn').textContent='🔇';
     }
 }
 
-function nextSong() {
-    bgMusic.pause();
-    currentSong = (currentSong + 1) % playlist.length; 
-    bgMusic = new Audio(playlist[currentSong]);
-    bgMusic.volume = 0.2;
-    bgMusic.addEventListener('ended', nextSong);
-    bgMusic.play();
-    document.getElementById('music-btn').textContent = '🔊';
+async function nextSong(){
+    const list=await loadPlaylist();
+    if(!list.length)return;
+    if(bgMusic)bgMusic.pause();
+    currentSong=(currentSong+1)%list.length;
+    bgMusic=new Audio(list[currentSong]);
+    bgMusic.volume=0.2;
+    bgMusic.addEventListener('ended',nextSong);
+    bgMusic.play().catch(e=>console.log("Browser blocked autoplay until user clicks"));
+    document.getElementById('music-btn').textContent='🔊';
     snack('🎵 Playing next track...');
 }
 
@@ -3069,18 +3552,33 @@ function buildMatchHeadline(goalsA,goalsB,nameA,nameB,goalDiff){
 // ============================================================
 // ACHIEVEMENT ENGINE (BADGES ONLY)
 // ============================================================
-function checkAchievements(db, matchEvents) {
+// ============================================================
+// ACHIEVEMENT ENGINE — numeric milestones, performance streaks,
+// and rare/funny "hall of shame"-style badges.
+// ============================================================
+function checkAchievements(db, matchEvents, matchResults) {
+    matchResults = matchResults || {};
     Object.keys(matchEvents.goals).forEach(pid => {
         const p = db.players.find(x => x.id === pid);
         if(!p) return;
         p.stats.badges = p.stats.badges || [];
-        let newBadges = [];
-        if(matchEvents.goals[pid] >= 3 && !p.stats.badges.includes('🎩 Hat-Trick')) {
-            p.stats.badges.push('🎩 Hat-Trick'); newBadges.push('🎩 Hat-Trick');
-        }
-        if((p.stats.goals || 0) >= 50 && !p.stats.badges.includes('🎯 Sniper')) {
-            p.stats.badges.push('🎯 Sniper'); newBadges.push('🎯 Sniper');
-        }
+        const newBadges = [];
+        const award = (badge) => { if(!p.stats.badges.includes(badge)){ p.stats.badges.push(badge); newBadges.push(badge); } };
+
+        // --- Performance-based (this match) ---
+        if(matchEvents.goals[pid] >= 3) award('🎩 Hat-Trick');
+        if((p.stats.winStreak || 0) >= 5) award('🔥 5-Win Streak');
+
+        // --- Numeric milestones (career totals) ---
+        if((p.stats.goals || 0) >= 50) award('🎯 Sniper');
+        if((p.stats.goals || 0) >= 100) award('💯 Century Club (100 Goals)');
+        if((p.stats.matchesPlayed || 0) >= 50) award('🎖️ Veteran (50 Matches)');
+        if(playerTournamentCount(pid, db) >= 10) award('🏆 Serial Competitor (10 Cups)');
+
+        // --- Rare / funny ---
+        if((p.stats.totalLosses || 0) === 1 && matchResults[pid] === 'loss') award('😅 First Defeat');
+        if(matchEvents.cards[pid] === 'red' && (p.stats.red || 0) === 1) award('🟥 Seeing Red (First Red Card)');
+
         if(newBadges.length > 0) {
             snack(`🏆 ${p.name} unlocked: ${newBadges.join(', ')}`);
             addNews(`🏅 ACHIEVEMENT: ${p.name} earned ${newBadges.join(', ')}!`, '🏅');
