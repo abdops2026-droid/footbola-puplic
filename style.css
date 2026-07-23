@@ -4,11 +4,17 @@
   --gold:#f0b429;--gold2:#ffd166;--gold3:rgba(240,180,41,0.12);
   --green:#06d77b;--blue:#4dabf7;--red:#ff4757;--purple:#a855f7;
   --text:#f0f0fa;--sub:#5a5a8a;--border:rgba(255,255,255,0.06);
-  --radius:16px;--nav-h:72px;
+  --radius:16px;--nav-h:72px;--app-w:430px;
 }
+/* On phones (the default) the app fills the screen exactly as before.
+   On wider viewports (tablets/desktops) it now scales up progressively
+   instead of staying locked to a narrow 430px island. */
+@media (min-width:700px){:root{--app-w:600px}}
+@media (min-width:1000px){:root{--app-w:820px}}
+@media (min-width:1400px){:root{--app-w:960px}}
 html,body{height:100%;overflow:hidden;background:var(--bg)}
 body{display:flex;justify-content:center;align-items:stretch;font-family:'Rajdhani',sans-serif;color:var(--text)}
-#app{width:100%;max-width:430px;height:100vh;position:relative;overflow:hidden;background:var(--bg)}
+#app{width:100%;max-width:var(--app-w);height:100vh;position:relative;overflow:hidden;background:var(--bg)}
 #app::before{content:'';position:absolute;inset:0;pointer-events:none;z-index:0;
   background:radial-gradient(ellipse 70% 40% at 50% -10%,rgba(240,180,41,0.06) 0%,transparent 70%)}
 #app::after{content:'';position:absolute;inset:0;pointer-events:none;z-index:0;
@@ -113,7 +119,7 @@ body{display:flex;justify-content:center;align-items:stretch;font-family:'Rajdha
 .sec-ttl{font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:2px;color:var(--sub)}
 
 /* NAV */
-.nav-bar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;height:var(--nav-h);
+.nav-bar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:var(--app-w);height:var(--nav-h);
   background:rgba(8,8,20,0.97);backdrop-filter:blur(28px);border-top:1px solid var(--border);display:flex;align-items:center;z-index:100}
 .nav-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;padding:8px 4px;transition:all 0.2s;opacity:0.35;user-select:none}
 .nav-item.active{opacity:1}
@@ -396,7 +402,7 @@ body{display:flex;justify-content:center;align-items:stretch;font-family:'Rajdha
 /* MODALS */
 .modal-ov{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.78);z-index:200;align-items:flex-end;justify-content:center;backdrop-filter:blur(6px)}
 .modal-ov.active{display:flex}
-.modal{background:var(--surface);border-radius:24px 24px 0 0;border:1px solid var(--border);border-bottom:none;padding:20px 18px 44px;width:100%;max-width:430px;max-height:90vh;overflow-y:auto;animation:slideUp 0.3s cubic-bezier(0.34,1.26,0.64,1)}
+.modal{background:var(--surface);border-radius:24px 24px 0 0;border:1px solid var(--border);border-bottom:none;padding:20px 18px 44px;width:100%;max-width:var(--app-w);max-height:90vh;overflow-y:auto;animation:slideUp 0.3s cubic-bezier(0.34,1.26,0.64,1)}
 @keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
 .modal-handle{width:40px;height:4px;border-radius:2px;background:var(--border);margin:0 auto 20px}
 .modal-title{font-family:'Bebas Neue',sans-serif;font-size:26px;letter-spacing:1.5px;margin-bottom:18px}

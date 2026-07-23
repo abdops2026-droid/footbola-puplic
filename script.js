@@ -32,14 +32,18 @@ async function saveDB(db) {
         tier: p.tier, stars: p.stars, stats: p.stats, market_value: p.marketValue,
         previous_market_value: p.previousMarketValue ?? null,
         market_value_history: p.marketValueHistory ?? [],
-        status: p.status || 'active'
+        status: p.status || 'active',
+        bio: p.bio || '', position: p.position || '', preferred_foot: p.preferredFoot || '',
+        age: p.age ?? null, jersey_number: p.jerseyNumber ?? null, favorite_team: p.favoriteTeam || ''
     }));
 
     const tournamentUpdates = db.tournaments.map(t => ({
         id: t.id, name: t.name, format: t.format, type: t.type, status: t.status,
         participants: t.participants, standings: t.standings, matches: t.matches,
         phase: t.phase, schedule: t.schedule, bracket: t.bracket,
-        groups: t.groups, auto_qualify: t.autoQualify || false, archived_at: t.archivedAt || null
+        groups: t.groups, auto_qualify: t.autoQualify || false, archived_at: t.archivedAt || null,
+        category: t.category || 'official',
+        banner: t.banner || '', logo: t.logo || '', theme_color: t.themeColor || '#f0b429'
     }));
 
     try {
@@ -74,7 +78,9 @@ async function saveSingleTournament(t) {
         id: t.id, name: t.name, format: t.format, type: t.type, status: t.status,
         participants: t.participants, standings: t.standings, matches: t.matches,
         phase: t.phase, schedule: t.schedule, bracket: t.bracket,
-        groups: t.groups, auto_qualify: t.autoQualify || false, archived_at: t.archivedAt || null
+        groups: t.groups, auto_qualify: t.autoQualify || false, archived_at: t.archivedAt || null,
+        category: t.category || 'official',
+        banner: t.banner || '', logo: t.logo || '', theme_color: t.themeColor || '#f0b429'
     });
 }
 
@@ -85,7 +91,9 @@ async function saveSinglePlayer(p) {
         tier: p.tier, stars: p.stars, stats: p.stats, market_value: p.marketValue,
         previous_market_value: p.previousMarketValue ?? null,
         market_value_history: p.marketValueHistory ?? [],
-        status: p.status || 'active'
+        status: p.status || 'active',
+        bio: p.bio || '', position: p.position || '', preferred_foot: p.preferredFoot || '',
+        age: p.age ?? null, jersey_number: p.jerseyNumber ?? null, favorite_team: p.favoriteTeam || ''
     }, { onConflict: 'player_id' });
 }
 
@@ -94,7 +102,7 @@ async function saveSinglePlayer(p) {
 // ============================================================
 let currentUser=null;
 let activeTournIdx=null;
-let cData={format:'league',type:'1v1',selected:[],teams:[]};
+let cData={format:'league',type:'1v1',category:'official',selected:[],teams:[]};
 let arenaFilterStatus='all';
 let lockerFilterTier='all';
 let marketFilterTier='all';
@@ -131,6 +139,8 @@ function haptic(pattern=15){
     @keyframes fbFadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
     .skel{background:linear-gradient(90deg,rgba(255,255,255,0.04) 25%,rgba(255,255,255,0.09) 37%,rgba(255,255,255,0.04) 63%);background-size:400% 100%;animation:fbShimmer 1.4s ease infinite;border-radius:13px}
     @keyframes fbShimmer{0%{background-position:100% 50%}100%{background-position:0% 50%}}
+    .theme-swatch{width:34px;height:34px;border-radius:50%;cursor:pointer;border:3px solid transparent;transition:all 0.15s;box-shadow:inset 0 0 0 1px rgba(255,255,255,0.15)}
+    .theme-swatch.sel{border-color:#fff;box-shadow:0 0 0 2px rgba(255,255,255,0.25),0 0 12px rgba(255,255,255,0.4)}
   `;
   document.head.appendChild(style);
 })();
@@ -744,6 +754,8 @@ function renderArena(){
   const isAdmin=currentUser?.type==='admin';
   const createBtn=document.getElementById('create-btn');
   if(createBtn)createBtn.style.display=isAdmin?'flex':'none';
+  const challengeBtn=document.getElementById('challenge-btn');
+  if(challengeBtn)challengeBtn.style.display=isAdmin?'flex':'none';
   const navDash=document.getElementById('nav-dashboard');
   if(navDash)navDash.style.display=isAdmin?'':'none';
   const archChip=document.getElementById('arena-filter-archived');
@@ -766,9 +778,18 @@ function renderArena(){
       :t.status==='ended'
       ?`<span class="ended-badge">ENDED</span>`
       :`<div class="live-badge"><div class="live-dot"></div>LIVE</div>`;
-    return `<div class="t-card" onclick="openTournament(${i})">
-      <div class="t-card-top">${badge}<div class="av-stack">${buildAvatarStack(t,db)}</div></div>
-      <div class="t-name">${t.name}</div>
+    const catTag=t.category==='friendly'
+      ?`<span style="font-size:9px;font-weight:700;background:rgba(240,180,41,0.12);color:var(--gold);padding:2px 8px;border-radius:20px;border:1px solid rgba(240,180,41,0.25);margin-left:6px">🤝 FRIENDLY</span>`
+      :t.category==='qualifier'
+      ?`<span style="font-size:9px;font-weight:700;background:rgba(77,171,247,0.12);color:var(--blue);padding:2px 8px;border-radius:20px;border:1px solid rgba(77,171,247,0.25);margin-left:6px">🎯 QUALIFIER</span>`
+      :'';
+    const bannerHtml=t.banner?`<div style="margin:-18px -18px 12px;height:68px;background-image:url('${t.banner}');background-size:cover;background-position:center;border-radius:16px 16px 0 0"></div>`:'';
+    const logoHtml=t.logo?`<img src="${t.logo}" style="width:22px;height:22px;border-radius:6px;object-fit:cover;margin-right:6px;flex-shrink:0;vertical-align:middle">`:'';
+    const cardStyleAttr=t.themeColor?` style="--gold:${t.themeColor}"`:'';
+    return `<div class="t-card" onclick="openTournament(${i})"${cardStyleAttr}>
+      ${bannerHtml}
+      <div class="t-card-top"><div style="display:flex;align-items:center">${badge}${catTag}</div><div class="av-stack">${buildAvatarStack(t,db)}</div></div>
+      <div class="t-name" style="display:flex;align-items:center">${logoHtml}<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.name}</span></div>
       <div class="t-meta">${t.type.toUpperCase()} · ${t.format==='league'?'🏅 League':'🌳 Elimination'} · ${t.participants.length} ${t.type==='2v2'?'teams':'players'}</div>
     </div>`;
   }).join(''));
@@ -788,18 +809,51 @@ function buildAvatarStack(t,db){
 // CREATE TOURNAMENT
 // ============================================================
 function openCreate(){
-  cData={format:'league',type:'1v1',selected:[],teams:[],groupCount:2,groupAssign:null,groupQualifiers:[],legs:2,autoQualify:false};pendingPro=null;
+  cData={format:'league',type:'1v1',category:'official',selected:[],teams:[],groupCount:2,groupAssign:null,groupQualifiers:[],legs:2,autoQualify:false,themeColor:'#f0b429'};pendingPro=null;
   document.getElementById('cup-name').value='';
+  document.querySelectorAll('#category-row .f-opt').forEach(el=>el.classList.toggle('sel',el.dataset.val==='official'));
   document.querySelectorAll('#format-row .f-opt').forEach(el=>el.classList.toggle('sel',el.dataset.val==='league'));
   document.querySelectorAll('#type-row .f-opt').forEach(el=>el.classList.toggle('sel',el.dataset.val==='1v1'));
+  document.querySelectorAll('#theme-color-row .theme-swatch').forEach(el=>el.classList.toggle('sel',el.dataset.color==='#f0b429'));
+  const bannerPrev=document.getElementById('create-banner-prev');if(bannerPrev)bannerPrev.innerHTML='🖼️';
+  const bannerData=document.getElementById('create-banner-data');if(bannerData)bannerData.value='';
+  const logoPrev=document.getElementById('create-logo-prev');if(logoPrev)logoPrev.innerHTML='🏷️';
+  const logoData=document.getElementById('create-logo-data');if(logoData)logoData.value='';
   hideErr('create-err');
   renderCreatePlayers();
   renderGroupConfig();
   document.getElementById('modal-create').classList.add('active');
 }
+function setThemeColor(color,el){
+  el.parentElement.querySelectorAll('.theme-swatch').forEach(x=>x.classList.remove('sel'));
+  el.classList.add('sel');
+  cData.themeColor=color;
+}
+function handleBannerPhoto(input){
+  const file=input.files[0];if(!file)return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    const img=new Image();
+    img.onload=()=>{
+      const W=600,H=200;
+      const canvas=document.createElement('canvas');canvas.width=W;canvas.height=H;
+      const ctx=canvas.getContext('2d');
+      const scale=Math.max(W/img.width,H/img.height);
+      const sw=W/scale,sh=H/scale;
+      const sx=(img.width-sw)/2,sy=(img.height-sh)/2;
+      ctx.drawImage(img,sx,sy,sw,sh,0,0,W,H);
+      const data=canvas.toDataURL('image/jpeg',0.75);
+      document.getElementById('create-banner-prev').innerHTML=`<img src="${data}" style="width:100%;height:100%;object-fit:cover">`;
+      document.getElementById('create-banner-data').value=data;
+    };
+    img.src=e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
 function setCreate(prop,el){
   el.parentElement.querySelectorAll('.f-opt').forEach(x=>x.classList.remove('sel'));
   el.classList.add('sel');cData[prop]=el.dataset.val;
+  if(prop==='category')return; // category doesn't affect player/format selections — nothing else to reset
   cData.selected=[];cData.teams=[];pendingPro=null;
   cData.groupAssign=null;cData.groupQualifiers=[];
   renderCreatePlayers();
@@ -1020,7 +1074,9 @@ async function createTournament(){
     }
   });
 
-  let t={id:Date.now(),name,format:cData.format,type:cData.type,participants,standings,matches:[],status:'active'};
+  const bannerData=document.getElementById('create-banner-data')?.value||'';
+  const logoData=document.getElementById('create-logo-data')?.value||'';
+  let t={id:Date.now(),name,format:cData.format,type:cData.type,category:cData.category||'official',participants,standings,matches:[],status:'active',banner:bannerData,logo:logoData,themeColor:cData.themeColor||'#f0b429'};
   const n=participants.length;
 
   if(cData.format==='groups'){
@@ -1117,6 +1173,70 @@ function generateBracket(playerIds,type){
 }
 
 // ============================================================
+// QUICK FRIENDLY CHALLENGE — shortcut that auto-creates a minimal
+// 2-player Friendly-category tournament (reusing all the existing
+// tournament/match infrastructure) and jumps straight into recording
+// the result, instead of a whole separate parallel system.
+// ============================================================
+function openFriendlyChallenge(){
+  const db=getDB();
+  const eligible=db.players.filter(p=>!p.status||p.status==='active');
+  hideErr('challenge-err');
+  if(eligible.length<2){
+    document.getElementById('challenge-body').innerHTML=`<div style="font-size:12px;color:var(--sub);padding:10px 0">Need at least 2 active players to start a challenge.</div>`;
+    document.getElementById('modal-challenge').classList.add('active');
+    return;
+  }
+  const opts=eligible.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+  document.getElementById('challenge-body').innerHTML=`
+    <div class="field"><label>Player 1</label><select id="chal-a" class="select-field"><option value="">— Select —</option>${opts}</select></div>
+    <div class="field"><label>Player 2</label><select id="chal-b" class="select-field"><option value="">— Select —</option>${opts}</select></div>`;
+  document.getElementById('modal-challenge').classList.add('active');
+}
+
+async function createFriendlyChallenge(){
+  hideErr('challenge-err');
+  const aId=document.getElementById('chal-a')?.value;
+  const bId=document.getElementById('chal-b')?.value;
+  if(!aId||!bId){showErr('challenge-err','Pick both players!');return}
+  if(aId===bId){showErr('challenge-err','Pick two different players!');return}
+
+  const db=getDB();
+  const pA=db.players.find(x=>x.id===aId), pB=db.players.find(x=>x.id===bId);
+  if(!pA||!pB)return;
+
+  const btn=document.querySelector('#modal-challenge .btn-gold');
+  if(btn){btn.innerHTML='⏳ STARTING...';btn.style.pointerEvents='none';}
+
+  const standings=[
+    {id:aId,name:pA.name,PL:0,W:0,D:0,L:0,GF:0,GA:0,GD:0,PTS:0},
+    {id:bId,name:pB.name,PL:0,W:0,D:0,L:0,GF:0,GA:0,GD:0,PTS:0}
+  ];
+  const t={
+    id:Date.now(),
+    name:`${pA.name} vs ${pB.name} — Friendly`,
+    format:'league',type:'1v1',category:'friendly',
+    participants:[aId,bId],standings,matches:[],status:'active',
+    phase:'group',
+    schedule:[{aId,bId,leg:1,played:false}]
+  };
+
+  db.tournaments.unshift(t);
+  await saveSingleTournament(t);
+  localStorage.setItem(DB_KEY, JSON.stringify(db));
+  addNews(`🤝 Friendly challenge kicked off: ${pA.name} vs ${pB.name}!`,'🤝');
+
+  if(btn){btn.innerHTML='🤝 START CHALLENGE';btn.style.pointerEvents='auto';}
+  closeModal('modal-challenge');
+  renderArena();
+
+  // Jump straight into recording the result
+  const idx=db.tournaments.indexOf(t);
+  openTournament(idx);
+  openRecord();
+}
+
+// ============================================================
 // TOURNAMENT SCREEN — Updated to show Qualify button
 // ============================================================
 function openTournament(idx){activeTournIdx=idx;renderTournamentScreen();showScreen('screen-tournament')}
@@ -1125,9 +1245,24 @@ function getTournament(){if(activeTournIdx===null)return null;return getDB().tou
 
 function renderTournamentScreen(){
   const t=getTournament();if(!t)return;
-  document.getElementById('t-scr-name').textContent=t.name;
+  const logoHtmlScr=t.logo?`<img src="${t.logo}" style="width:22px;height:22px;border-radius:6px;object-fit:cover;vertical-align:middle;margin-right:7px">`:'';
+  document.getElementById('t-scr-name').innerHTML=`${logoHtmlScr}${t.name}`;
+  const hdrEl=document.querySelector('.t-scr-hdr');
+  if(hdrEl){
+    if(t.banner){
+      hdrEl.style.backgroundImage=`linear-gradient(180deg, rgba(4,4,13,0.5) 0%, rgba(4,4,13,0.93) 100%), url('${t.banner}')`;
+      hdrEl.style.backgroundSize='cover';
+      hdrEl.style.backgroundPosition='center';
+    } else {
+      hdrEl.style.backgroundImage='';
+      hdrEl.style.backgroundSize='';
+      hdrEl.style.backgroundPosition='';
+    }
+    hdrEl.style.setProperty('--gold', t.themeColor||'#f0b429');
+  }
   const archTag=t.archivedAt?' · <span style="color:var(--sub)">📦 ARCHIVED</span>':'';
-  document.getElementById('t-scr-meta').innerHTML=`${t.type.toUpperCase()} · ${t.format==='league'?'🏅 League':'🌳 Elimination'} · <span style="color:${t.status==='active'?'var(--green)':'var(--sub)'}">● ${t.status==='active'?'LIVE':'ENDED'}</span>${archTag}`;
+  const catTagScr=t.category==='friendly'?' · <span style="color:var(--gold)">🤝 Friendly</span>':t.category==='qualifier'?' · <span style="color:var(--blue)">🎯 Qualifier</span>':'';
+  document.getElementById('t-scr-meta').innerHTML=`${t.type.toUpperCase()} · ${t.format==='league'?'🏅 League':'🌳 Elimination'} · <span style="color:${t.status==='active'?'var(--green)':'var(--sub)'}">● ${t.status==='active'?'LIVE':'ENDED'}</span>${catTagScr}${archTag}`;
   renderNextMatch(t);
   renderStandings();
   renderMatchHistory();
@@ -1139,14 +1274,20 @@ function renderTournamentScreen(){
   const btnRecord=document.getElementById('btn-record'); if(btnRecord)btnRecord.style.display=isActive?'':'none';
   const btnEditLast=document.getElementById('btn-edit-last');
   if(btnEditLast)btnEditLast.style.display=(isActive&&t.phase!=='elimination'&&t.matches&&t.matches.length>0)?'':'none';
-  const btnEnd=document.getElementById('btn-end'); if(btnEnd)btnEnd.style.display=isActive?'':'none';
+  const btnEnd=document.getElementById('btn-end');
+  if(btnEnd){
+    btnEnd.style.display=isActive?'':'none';
+    btnEnd.innerHTML=isRewardTournament(t)?'🔴 END CUP & AWARD TROPHY':'🔴 END (NO CUP — QUALIFIER/FRIENDLY)';
+  }
   const btnArchiveT=document.getElementById('btn-archive-t');
   if(btnArchiveT)btnArchiveT.textContent=t.archivedAt?'✅ UN-ARCHIVE TOURNAMENT':'📦 ARCHIVE TOURNAMENT';
 
-  // Show Qualify button only when in group phase (league with pending elimination)
+  // Show Qualify button only when in group phase AND there are actually
+  // enough participants for it to ever pass validation (a 2-player quick
+  // friendly challenge has nothing to "qualify" to a knockout tree).
   const qBtn=document.getElementById('btn-qualify');
   if(qBtn){
-    qBtn.style.display=(isActive&&(t.phase==='group'||t.phase==='groups'))?'flex':'none';
+    qBtn.style.display=(isActive&&(t.phase==='group'||t.phase==='groups')&&t.participants.length>2)?'flex':'none';
     qBtn.innerHTML=t.phase==='groups'?'⚡ QUALIFY GROUP WINNERS':'⚡ QUALIFY TOP PLAYERS';
   }
 }
@@ -1757,7 +1898,7 @@ async function saveMatch(){
       else if(isTeamB && goalsB < goalsA) matchResult = 'loss';
       matchResults[pid]=matchResult;
 
-      updatePlayerMarketValue(db, pid, { result: matchResult, goals: g, card: card });
+      updatePlayerMarketValue(db, pid, { result: matchResult, goals: g, card: card }, isRewardTournament(t));
       const p = db.players.find(x => x.id === pid);
       if(p){
           p.stats.matchesPlayed=(p.stats.matchesPlayed||0)+1;
@@ -2009,11 +2150,11 @@ async function submitMotmVote(){
           const oldWinner = db.players.find(x=>x.name===prevMotmName);
           if(oldWinner) {
               oldWinner.stats.xp = Math.max(0, (oldWinner.stats.xp || 0) - 30);
-              oldWinner.marketValue = Math.max(100000, (oldWinner.marketValue || 500000) - 200000);
+              if(isRewardTournament(t))oldWinner.marketValue = Math.max(100000, (oldWinner.marketValue || 500000) - 200000);
               playersToSave.push(oldWinner);
           }
       }
-      match.motm = winnerName; awardXP(db,winner[0],30); awardMotmValue(db,winner[0]);
+      match.motm = winnerName; awardXP(db,winner[0],30); if(isRewardTournament(t))awardMotmValue(db,winner[0]);
       if(winnerPlayer) playersToSave.push(winnerPlayer);
       addNews(`🏅 ${winnerName} won Man of the Match!`,'⭐');
     }
@@ -2056,7 +2197,14 @@ function confirmEnd(){
 
   const txt=document.querySelector('#conf-ov .conf-txt');
   if(txt){
-    txt.innerHTML=`🏆 Champion: <strong style="color:var(--gold)">${winner?winner.name:'—'}</strong>${bootNames.length?`<br>🥾 Golden Boot: <strong style="color:var(--gold)">${bootNames.join(' & ')}</strong> (${maxGoals} goals)`:''}<br><br>Points, goals & XP are permanently saved. The cup is locked forever.`;
+    if(isRewardTournament(t)){
+      const mvpPreview=computeTournamentMVP(t,db);
+      const mvpName=mvpPreview?(db.players.find(x=>x.id===mvpPreview.pid)?.name||''):'';
+      txt.innerHTML=`🏆 Champion: <strong style="color:var(--gold)">${winner?winner.name:'—'}</strong>${bootNames.length?`<br>🥾 Golden Boot: <strong style="color:var(--gold)">${bootNames.join(' & ')}</strong> (${maxGoals} goals)`:''}${mvpName?`<br>🏅 Tournament MVP: <strong style="color:var(--gold)">${mvpName}</strong> (Score: ${mvpPreview.score})`:''}<br><br>Points, goals & XP are permanently saved. The cup is locked forever.`;
+    } else {
+      const catLabel=t.category==='friendly'?'🤝 Friendly':'🎯 Qualifier';
+      txt.innerHTML=`${catLabel} winner: <strong style="color:var(--gold)">${winner?winner.name:'—'}</strong><br><br>No cup, no golden boot, no market value change — but XP, ELO, goals, cards and points are permanently saved to history.`;
+    }
   }
   document.getElementById('conf-ov').classList.add('active');
 }
@@ -2103,10 +2251,12 @@ async function endCup(){
   });
   
   const winPids=t.type==='1v1'?[winner.id]:[winner.proId,winner.youthId].filter(Boolean);
-  winPids.forEach(pid=>{const p=db.players.find(x=>x.id===pid);if(!p)return;p.stats.trophies=(p.stats.trophies||0)+1;awardXP(db,pid,200);p.marketValue=(p.marketValue||500000)+500000;recordMarketValueHistory(p);});
+  const rewardTournament=isRewardTournament(t);
+  winPids.forEach(pid=>{const p=db.players.find(x=>x.id===pid);if(!p)return;awardXP(db,pid,200);if(rewardTournament){p.stats.trophies=(p.stats.trophies||0)+1;p.previousMarketValue=p.marketValue||500000;p.marketValue=(p.marketValue||500000)+500000;recordMarketValueHistory(p);}});
 
-  // 💎 Perfect Cup — champion went the entire tournament without a single loss
-  if((winner.L||0)===0){
+  // 💎 Perfect Cup — champion went the entire tournament without a single loss.
+  // Tied to actually being crowned champion, so Official tournaments only.
+  if(rewardTournament&&(winner.L||0)===0){
     winPids.forEach(pid=>{
       const p=db.players.find(x=>x.id===pid);if(!p)return;
       p.stats.badges=p.stats.badges||[];
@@ -2118,11 +2268,35 @@ async function endCup(){
   }
   
   let bootNames=[];
-  topScorerIds.forEach(pid=>{const p=db.players.find(x=>x.id===pid);if(p){p.stats.goldenBoots=(p.stats.goldenBoots||0)+1;awardXP(db,pid,100);p.marketValue=(p.marketValue||500000)+300000;recordMarketValueHistory(p);bootNames.push(p.name);}});
+  topScorerIds.forEach(pid=>{const p=db.players.find(x=>x.id===pid);if(p){awardXP(db,pid,100);if(rewardTournament){p.stats.goldenBoots=(p.stats.goldenBoots||0)+1;p.previousMarketValue=p.marketValue||500000;p.marketValue=(p.marketValue||500000)+300000;recordMarketValueHistory(p);}bootNames.push(p.name);}});
+
+  // 🏅 Tournament MVP — Official tournaments only, min. 3 matches played,
+  // score = goals×3 + wins×2 + MOTM×5, ties broken by most goals.
+  let mvpAward=null;
+  if(rewardTournament){
+    const mvp=computeTournamentMVP(t,db);
+    if(mvp){
+      const mp=db.players.find(x=>x.id===mvp.pid);
+      if(mp){
+        awardXP(db,mvp.pid,150);
+        mp.stats.tournamentMVPs=(mp.stats.tournamentMVPs||0)+1;
+        mp.previousMarketValue=mp.marketValue||500000;
+        mp.marketValue=(mp.marketValue||500000)+200000;
+        recordMarketValueHistory(mp);
+        mvpAward={name:mp.name,score:mvp.score};
+      }
+    }
+  }
   
   t.status='ended';
-  addNews(`🏆 "${t.name}" ended! Winner: ${winner.name}! 🎉`,'🏆');
-  if(bootNames.length>0)addNews(`🥾 GOLDEN BOOT: ${bootNames.join(' & ')} (${maxGoals} Goals)`,'🥾');
+  if(rewardTournament){
+    addNews(`🏆 "${t.name}" ended! Winner: ${winner.name}! 🎉`,'🏆');
+    if(bootNames.length>0)addNews(`🥾 GOLDEN BOOT: ${bootNames.join(' & ')} (${maxGoals} Goals)`,'🥾');
+    if(mvpAward)addNews(`🏅 TOURNAMENT MVP: ${mvpAward.name} named MVP of "${t.name}" (Score: ${mvpAward.score})!`,'🏅');
+  } else {
+    const catLabel=t.category==='friendly'?'🤝 Friendly':'🎯 Qualifier';
+    addNews(`${catLabel} "${t.name}" ended! ${winner.name} came out on top (no cup awarded).`,t.category==='friendly'?'🤝':'🎯');
+  }
   
   // رفع البيانات للسيرفر بأمان تام
   await saveSingleTournament(t);
@@ -2218,12 +2392,14 @@ function reversePlayerMarketValue(db,pid,matchData){
   else if(matchData.card==='red')val+=150000;
   if(val<100000)val=100000; // safety floor — same as the forward engine
   p.marketValue=val;
+  recordMarketValueHistory(p);
 }
 function revertMatchEffects(db,t,m){
   const events=m.events||{goals:{},cards:{}};
   const tA=t.standings.find(s=>s.id===m.aId);
   const tB=t.standings.find(s=>s.id===m.bId);
   const goalsA=m.goalsA, goalsB=m.goalsB;
+  const rewardTournament=isRewardTournament(t);
 
   Object.keys(events.goals||{}).forEach(pid=>{
     const g=events.goals[pid];
@@ -2234,9 +2410,15 @@ function revertMatchEffects(db,t,m){
     if(isTeamA&&goalsA>goalsB)matchResult='win';else if(isTeamA&&goalsA<goalsB)matchResult='loss';
     else if(isTeamB&&goalsB>goalsA)matchResult='win';else if(isTeamB&&goalsB<goalsA)matchResult='loss';
 
-    reversePlayerMarketValue(db,pid,{result:matchResult,goals:g,card:card});
+    if(rewardTournament)reversePlayerMarketValue(db,pid,{result:matchResult,goals:g,card:card});
+    const p=db.players.find(x=>x.id===pid);
+    if(p){
+      p.stats.matchesPlayed=Math.max(0,(p.stats.matchesPlayed||0)-1);
+      if(matchResult==='loss')p.stats.totalLosses=Math.max(0,(p.stats.totalLosses||0)-1);
+      // Note: winStreak is a running counter, not a history log — like ELO,
+      // it's intentionally left alone here since it can't be cleanly un-wound.
+    }
     if(g>0&&card!=='red'){
-      const p=db.players.find(x=>x.id===pid);
       if(p){p.stats.goals=Math.max(0,(p.stats.goals||0)-g);awardXP(db,pid,-(g*10));}
     }
   });
@@ -2278,9 +2460,21 @@ function revertTournamentEndEffects(db,t){
 
   if(winner){
     const winPids=t.type==='1v1'?[winner.id]:[winner.proId,winner.youthId].filter(Boolean);
-    winPids.forEach(pid=>{const p=db.players.find(x=>x.id===pid);if(!p)return;p.stats.trophies=Math.max(0,(p.stats.trophies||0)-1);awardXP(db,pid,-200);p.marketValue=Math.max(100000,(p.marketValue||500000)-500000);});
+    winPids.forEach(pid=>{const p=db.players.find(x=>x.id===pid);if(!p)return;awardXP(db,pid,-200);if(isRewardTournament(t)){p.stats.trophies=Math.max(0,(p.stats.trophies||0)-1);p.marketValue=Math.max(100000,(p.marketValue||500000)-500000);}});
   }
-  topScorerIds.forEach(pid=>{const p=db.players.find(x=>x.id===pid);if(p){p.stats.goldenBoots=Math.max(0,(p.stats.goldenBoots||0)-1);awardXP(db,pid,-100);p.marketValue=Math.max(100000,(p.marketValue||500000)-300000);}});
+  topScorerIds.forEach(pid=>{const p=db.players.find(x=>x.id===pid);if(p){awardXP(db,pid,-100);if(isRewardTournament(t)){p.stats.goldenBoots=Math.max(0,(p.stats.goldenBoots||0)-1);p.marketValue=Math.max(100000,(p.marketValue||500000)-300000);}}});
+
+  if(isRewardTournament(t)){
+    const mvp=computeTournamentMVP(t,db);
+    if(mvp){
+      const mp=db.players.find(x=>x.id===mvp.pid);
+      if(mp){
+        awardXP(db,mvp.pid,-150);
+        mp.stats.tournamentMVPs=Math.max(0,(mp.stats.tournamentMVPs||0)-1);
+        mp.marketValue=Math.max(100000,(mp.marketValue||500000)-200000);
+      }
+    }
+  }
 }
 
 // ============================================================
@@ -2518,7 +2712,7 @@ async function approvePlayer(idx){
       await supabaseClient.from('pending_requests').delete().eq('username', id);
 
       // 3. Update Local UI safely
-      db.players.push({id:id, name:req.name, pin:req.pin, photo:req.photo||'', tier:'youth', stars:0, stats:{xp:0,points:0,trophies:0,goals:0}, marketValue:500000, marketValueHistory:startHistory, status: 'active'});
+      db.players.push({id:id, name:req.name, pin:req.pin, photo:req.photo||'', tier:'youth', stars:0, stats:{xp:0,points:0,trophies:0,goals:0}, marketValue:500000, marketValueHistory:startHistory, status: 'active', bio:'', position:'', preferredFoot:'', age:null, jerseyNumber:null, favoriteTeam:''});
       db.pending.splice(idx,1);
       
       addNews(`✅ ${req.name} joined! Username: ${id}`,'👋');
@@ -2815,6 +3009,16 @@ function openProfile(idx,canEdit=false){
       ? s.badges.map(b => `<div style="display:inline-block; background:rgba(240,180,41,0.1); border:1px solid var(--gold); border-radius:8px; padding:4px 8px; font-size:11px; margin:2px; font-weight:700; color:var(--gold)">${b}</div>`).join('') 
       : '<div style="font-size:11px; color:var(--sub)">No badges yet.</div>';
 
+  const posLabel={GK:'🧤 GK',DF:'🛡️ DF',MF:'⚙️ MF',FW:'⚡ FW'}[p.position]||'';
+  const clubInfoParts=[];
+  if(posLabel)clubInfoParts.push(`<span>${posLabel}</span>`);
+  if(p.preferredFoot)clubInfoParts.push(`<span>🦶 ${p.preferredFoot}</span>`);
+  if(p.age)clubInfoParts.push(`<span>🎂 ${p.age}y</span>`);
+  if(p.jerseyNumber!=null&&p.jerseyNumber!=='')clubInfoParts.push(`<span>#${p.jerseyNumber}</span>`);
+  if(p.favoriteTeam)clubInfoParts.push(`<span>❤️ ${p.favoriteTeam}</span>`);
+  const clubInfoHtml=clubInfoParts.length?`<div style="display:flex;justify-content:center;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:12px;color:var(--sub);font-weight:600">${clubInfoParts.join('')}</div>`:'';
+  const bioHtml=p.bio?`<div style="margin-top:12px;font-size:13px;color:rgba(240,240,250,0.75);line-height:1.6;font-style:italic;text-align:center;padding:0 10px">"${p.bio}"</div>`:'';
+
   document.getElementById('profile-content').innerHTML=`
     <div class="profile-header">
       <div class="profile-avatar">${p.photo?`<img src="${p.photo}" loading="lazy">`:`${initials(p.name)}`}</div>
@@ -2827,6 +3031,8 @@ function openProfile(idx,canEdit=false){
         <div style="font-size:11px;color:var(--sub);margin-top:5px;font-weight:600">${xp} XP · Next at ${xpNextLevel} XP</div>
       </div>
       <div style="display:flex;justify-content:center;gap:4px;margin-top:12px">${formHTML}</div>
+      ${clubInfoHtml}
+      ${bioHtml}
     </div>
     
     <div style="margin-top:14px; padding:14px; background:var(--card); border-radius:12px; border:1px solid var(--border); text-align:center">
@@ -2853,6 +3059,13 @@ function openProfile(idx,canEdit=false){
       <div class="stat-cell" style="padding:10px 4px"><div class="stat-val" style="font-size:24px">${s.trophies||0}</div><div class="stat-lbl">Cups 🏆</div></div>
       <div class="stat-cell" style="padding:10px 4px"><div class="stat-val" style="font-size:24px">${s.goals||0}</div><div class="stat-lbl">Goals ⚽</div></div>
       <div class="stat-cell" style="padding:10px 4px; background:rgba(240,180,41,0.08); border-color:var(--gold)"><div class="stat-val" style="font-size:24px">${s.goldenBoots||0}</div><div class="stat-lbl" style="color:var(--gold)">Boots 🥾</div></div>
+    </div>
+
+    <div class="stat-grid" style="grid-template-columns: 1fr; margin-top:8px">
+      <div class="stat-cell" style="padding:10px 4px; background:rgba(168,85,247,0.08); border-color:var(--purple); display:flex; align-items:center; justify-content:center; gap:10px">
+        <div class="stat-val" style="font-size:24px;color:var(--purple)">${s.tournamentMVPs||0}</div>
+        <div class="stat-lbl" style="color:var(--purple)">Tournament MVP Awards 🏅</div>
+      </div>
     </div>
 
     <div class="stat-grid" style="margin-top:8px; grid-template-columns: 1fr 1fr;">
@@ -2886,7 +3099,8 @@ function openProfile(idx,canEdit=false){
       <div style="max-height:320px;overflow-y:auto">${last20Html}</div>
     </div>
 
-    ${canEdit?`<button class="btn btn-ghost" style="margin-top:14px" onclick="openEditSelfProfile(${idx})">✏️ Edit My Profile</button>`:''}`;
+    <button class="btn btn-gold" style="margin-top:14px" onclick="shareCard(${idx})">🖼️ SHARE PLAYER CARD</button>
+    ${canEdit?`<button class="btn btn-ghost" style="margin-top:10px" onclick="openEditSelfProfile(${idx})">✏️ Edit My Profile</button>`:''}`;
     
   document.getElementById('modal-profile').classList.add('active');
   
@@ -2925,8 +3139,221 @@ function openEditSelfProfile(idx){
       <div class="field"><label>Current PIN</label><input id="self-cur-pin" type="password" inputmode="numeric" maxlength="4" placeholder="••••"></div>
       <div class="field"><label>New PIN</label><input id="self-new-pin" type="password" inputmode="numeric" maxlength="4" placeholder="••••"></div>
       <button class="btn btn-gold" onclick="selfUpdatePin(${idx})">CHANGE PIN</button>
+    </div>
+    <div class="settings-card">
+      <div class="settings-title">⚽ Club Card Details</div>
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <div style="flex:1"><label style="font-size:9px;color:var(--sub);font-weight:700;display:block;margin-bottom:6px">POSITION</label>
+          <select id="self-position" class="select-field" style="margin-bottom:0">
+            <option value="">—</option>
+            <option value="GK" ${p.position==='GK'?'selected':''}>🧤 Goalkeeper</option>
+            <option value="DF" ${p.position==='DF'?'selected':''}>🛡️ Defender</option>
+            <option value="MF" ${p.position==='MF'?'selected':''}>⚙️ Midfielder</option>
+            <option value="FW" ${p.position==='FW'?'selected':''}>⚡ Forward</option>
+          </select>
+        </div>
+        <div style="flex:1"><label style="font-size:9px;color:var(--sub);font-weight:700;display:block;margin-bottom:6px">PREFERRED FOOT</label>
+          <select id="self-foot" class="select-field" style="margin-bottom:0">
+            <option value="">—</option>
+            <option value="Left" ${p.preferredFoot==='Left'?'selected':''}>🦶 Left</option>
+            <option value="Right" ${p.preferredFoot==='Right'?'selected':''}>🦶 Right</option>
+            <option value="Both" ${p.preferredFoot==='Both'?'selected':''}>🦶 Both</option>
+          </select>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <div style="flex:1"><label style="font-size:9px;color:var(--sub);font-weight:700;display:block;margin-bottom:6px">AGE</label><input type="number" id="self-age" class="select-field" style="margin-bottom:0" min="1" max="99" value="${p.age||''}" placeholder="—"></div>
+        <div style="flex:1"><label style="font-size:9px;color:var(--sub);font-weight:700;display:block;margin-bottom:6px">JERSEY #</label><input type="number" id="self-jersey" class="select-field" style="margin-bottom:0" min="0" max="99" value="${p.jerseyNumber!=null?p.jerseyNumber:''}" placeholder="—"></div>
+      </div>
+      <div class="field"><label>Favorite Real-World Team</label><input id="self-fav-team" type="text" value="${p.favoriteTeam||''}" placeholder="e.g. Al Ahly"></div>
+      <div class="field"><label>Bio (max 150 chars)</label><textarea id="self-bio" maxlength="150" rows="3" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:13px 15px;color:var(--text);font-family:'Rajdhani',sans-serif;font-size:14px;resize:vertical;outline:none">${p.bio||''}</textarea></div>
+      <button class="btn btn-blue" onclick="selfUpdateClubInfo(${idx})">UPDATE CLUB CARD</button>
     </div>`;
   document.getElementById('modal-edit-profile').classList.add('active');
+}
+
+// ============================================================
+// 🖼️ SHAREABLE PLAYER CARD — FIFA-style card generated entirely
+// in-browser with Canvas (no new storage needed). Card colors
+// change based on the player's level tier. Uses Web Share API
+// when available (mobile), falls back to a direct PNG download.
+// ============================================================
+function cardLevelTier(lvl){
+  if(lvl>=90)return{name:'LEGEND',grad:['#fff6d8','#f0b429','#8b5cf6'],text:'#241a0a'};
+  if(lvl>=70)return{name:'ELITE',grad:['#fff1cf','#f0b429','#b8790a'],text:'#241a0a'};
+  if(lvl>=50)return{name:'VETERAN',grad:['#ecd9ff','#a855f7','#5b1f96'],text:'#ffffff'};
+  if(lvl>=30)return{name:'REGULAR',grad:['#d7edff','#4dabf7','#155f9e'],text:'#ffffff'};
+  if(lvl>=15)return{name:'ROOKIE',grad:['#eceef4','#9a9ab0','#4c4c62'],text:'#ffffff'};
+  return{name:'AMATEUR',grad:['#ecd5b8','#b97a45','#6b3e1c'],text:'#ffffff'};
+}
+function cardRoundRect(ctx,x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);
+  ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+}
+function cardLoadImage(src){
+  return new Promise((resolve,reject)=>{
+    const img=new Image();
+    img.onload=()=>resolve(img);
+    img.onerror=reject;
+    img.src=src;
+  });
+}
+function cardFmtValue(v){
+  return v>=1000000?`€${(v/1000000).toFixed(1)}M`:`€${(v/1000).toFixed(0)}K`;
+}
+async function generatePlayerCardCanvas(p){
+  const W=340,H=520;
+  const canvas=document.createElement('canvas');
+  canvas.width=W;canvas.height=H;
+  const ctx=canvas.getContext('2d');
+  const lvl=getLevelFromXP(p.stats?.xp||0);
+  const tier=cardLevelTier(lvl);
+  const s=p.stats||{};
+
+  cardRoundRect(ctx,0,0,W,H,26);
+  const bgGrad=ctx.createLinearGradient(0,0,W,H);
+  bgGrad.addColorStop(0,tier.grad[0]);
+  bgGrad.addColorStop(0.5,tier.grad[1]);
+  bgGrad.addColorStop(1,tier.grad[2]);
+  ctx.fillStyle=bgGrad;
+  ctx.fill();
+  ctx.save();
+  ctx.clip();
+  ctx.strokeStyle='rgba(255,255,255,0.35)';
+  ctx.lineWidth=10;
+  ctx.beginPath();ctx.moveTo(-40,120);ctx.lineTo(120,-40);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(W-40,H+40);ctx.lineTo(W+40,H-40);ctx.stroke();
+  ctx.restore();
+
+  ctx.fillStyle=tier.text;
+  ctx.textAlign='left';
+  ctx.font='bold 48px Rajdhani, Arial';
+  ctx.fillText(String(lvl),26,68);
+  ctx.font='bold 13px Rajdhani, Arial';
+  ctx.fillText(tier.name,26,88);
+  if(p.jerseyNumber!=null&&p.jerseyNumber!==''){
+    ctx.font='bold 12px Rajdhani, Arial';
+    ctx.globalAlpha=0.85;
+    ctx.fillText('#'+p.jerseyNumber,26,102);
+    ctx.globalAlpha=1;
+  }
+
+  ctx.textAlign='right';
+  ctx.font='bold 13px Rajdhani, Arial';
+  ctx.fillText(p.tier==='pro'?'⭐ PRO':'🌱 YOUTH',W-26,42);
+  if(p.position){
+    ctx.font='bold 12px Rajdhani, Arial';
+    ctx.globalAlpha=0.85;
+    ctx.fillText(p.position,W-26,58);
+    ctx.globalAlpha=1;
+  }
+
+  const photoSize=136,photoX=W/2,photoY=178;
+  ctx.save();
+  ctx.beginPath();ctx.arc(photoX,photoY,photoSize/2,0,Math.PI*2);ctx.closePath();ctx.clip();
+  if(p.photo){
+    try{
+      const img=await cardLoadImage(p.photo);
+      ctx.drawImage(img,photoX-photoSize/2,photoY-photoSize/2,photoSize,photoSize);
+    }catch(e){
+      ctx.fillStyle='rgba(255,255,255,0.3)';
+      ctx.fillRect(photoX-photoSize/2,photoY-photoSize/2,photoSize,photoSize);
+    }
+  } else {
+    ctx.fillStyle='rgba(255,255,255,0.28)';
+    ctx.fillRect(photoX-photoSize/2,photoY-photoSize/2,photoSize,photoSize);
+    ctx.fillStyle=tier.text;
+    ctx.font='bold 46px Rajdhani, Arial';
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(initials(p.name),photoX,photoY);
+    ctx.textBaseline='alphabetic';
+  }
+  ctx.restore();
+  ctx.beginPath();ctx.arc(photoX,photoY,photoSize/2,0,Math.PI*2);
+  ctx.lineWidth=5;ctx.strokeStyle=tier.text;ctx.stroke();
+
+  ctx.fillStyle=tier.text;
+  ctx.textAlign='center';
+  ctx.font='bold 25px Rajdhani, Arial';
+  let displayName=p.name.toUpperCase();
+  if(ctx.measureText(displayName).width>W-50){
+    while(ctx.measureText(displayName+'…').width>W-50&&displayName.length>3)displayName=displayName.slice(0,-1);
+    displayName+='…';
+  }
+  ctx.fillText(displayName,W/2,272);
+
+  ctx.strokeStyle='rgba(0,0,0,0.18)';
+  ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(40,292);ctx.lineTo(W-40,292);ctx.stroke();
+
+  const statList=[
+    {label:'ELO',val:s.elo||1000},
+    {label:'GOALS ⚽',val:s.goals||0},
+    {label:'TROPHIES 🏆',val:s.trophies||0},
+    {label:'BOOTS 🥾',val:s.goldenBoots||0},
+    {label:'MVP 🏅',val:s.tournamentMVPs||0},
+    {label:'VALUE',val:cardFmtValue(p.marketValue||500000)}
+  ];
+  const cols=2,colW=(W-80)/cols;
+  ctx.textAlign='center';
+  statList.forEach((st,i)=>{
+    const col=i%cols,row=Math.floor(i/cols);
+    const x=40+colW*col+colW/2;
+    const y=326+row*52;
+    ctx.font='bold 22px Rajdhani, Arial';
+    ctx.fillStyle=tier.text;
+    ctx.fillText(String(st.val),x,y);
+    ctx.font='bold 10px Rajdhani, Arial';
+    ctx.globalAlpha=0.72;
+    ctx.fillText(st.label,x,y+16);
+    ctx.globalAlpha=1;
+  });
+
+  ctx.font='bold 12px Rajdhani, Arial';
+  ctx.fillStyle=tier.text;
+  ctx.globalAlpha=0.65;
+  ctx.textAlign='center';
+  ctx.fillText('F O O T B O L A',W/2,H-22);
+  ctx.globalAlpha=1;
+
+  return canvas;
+}
+async function shareCard(idx){
+  const db=getDB();const p=db.players[idx];if(!p)return;
+  snack('🖼️ Generating card...');
+  try{
+    const canvas=await generatePlayerCardCanvas(p);
+    canvas.toBlob(async(blob)=>{
+      if(!blob){snack('❌ Failed to generate card.');return;}
+      const fileName=`${p.name.replace(/\s+/g,'_')}_FOOTBOLA_Card.png`;
+      let shared=false;
+      if(navigator.share&&navigator.canShare){
+        try{
+          const file=new File([blob],fileName,{type:'image/png'});
+          if(navigator.canShare({files:[file]})){
+            await navigator.share({files:[file],title:`${p.name} — FOOTBOLA Card`,text:`Check out ${p.name}'s FOOTBOLA player card! ⚽`});
+            shared=true;
+          }
+        }catch(e){ /* user cancelled the share sheet — fall back to download below */ }
+      }
+      if(!shared){
+        const url=URL.createObjectURL(blob);
+        const a=document.createElement('a');
+        a.href=url;a.download=fileName;
+        document.body.appendChild(a);a.click();document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        snack('⬇️ Card downloaded!');
+      }
+    },'image/png');
+  }catch(e){
+    console.error(e);
+    snack('❌ Could not generate the card.');
+  }
 }
 
 // ============================================================
@@ -2961,6 +3388,21 @@ async function selfUpdatePin(idx){
   await saveSinglePlayer(db.players[idx]); // الحفظ الذكي
   localStorage.setItem(DB_KEY, JSON.stringify(db));
   snack('✅ PIN changed');closeModal('modal-edit-profile');
+}
+
+async function selfUpdateClubInfo(idx){
+  const db=getDB();const p=db.players[idx];if(!p)return;
+  p.position=document.getElementById('self-position').value;
+  p.preferredFoot=document.getElementById('self-foot').value;
+  const ageVal=parseInt(document.getElementById('self-age').value);
+  p.age=isNaN(ageVal)?null:Math.max(1,Math.min(99,ageVal));
+  const jerseyVal=parseInt(document.getElementById('self-jersey').value);
+  p.jerseyNumber=isNaN(jerseyVal)?null:Math.max(0,Math.min(99,jerseyVal));
+  p.favoriteTeam=document.getElementById('self-fav-team').value.trim();
+  p.bio=document.getElementById('self-bio').value.trim().slice(0,150);
+  await saveSinglePlayer(p);
+  localStorage.setItem(DB_KEY, JSON.stringify(db));
+  snack('✅ Club card updated');closeModal('modal-edit-profile');renderLocker();
 }
 
 // ============================================================
@@ -3059,14 +3501,155 @@ function renderLeagueRecords(db){
   </div>`;
 }
 
+// ============================================================
+// 2v2 CHEMISTRY — best-performing Pro+Youth duos, ranked by win
+// rate together. A pair needs at least 3 matches played together
+// to qualify for the ranking (avoids a fluky 1-match 100% record
+// topping the board).
+// ============================================================
+function computeChemistry(db){
+  const pairs={};
+  db.tournaments.forEach(t=>{
+    if(t.type!=='2v2')return;
+    (t.matches||[]).forEach(m=>{
+      const tA=t.standings.find(s=>s.id===m.aId),tB=t.standings.find(s=>s.id===m.bId);
+      [tA,tB].forEach(entry=>{
+        if(!entry||!entry.proId||!entry.youthId)return;
+        const key=entry.proId+'::'+entry.youthId;
+        if(!pairs[key])pairs[key]={proId:entry.proId,youthId:entry.youthId,proName:entry.proName,youthName:entry.youthName,matches:0,wins:0,draws:0,losses:0,goals:0};
+        const rec=pairs[key];
+        rec.matches++;
+        const isA=entry===tA;
+        const myGoals=isA?m.goalsA:m.goalsB;
+        const oppGoals=isA?m.goalsB:m.goalsA;
+        if(myGoals>oppGoals)rec.wins++;else if(myGoals<oppGoals)rec.losses++;else rec.draws++;
+        if(m.events&&m.events.goals)rec.goals+=(m.events.goals[entry.proId]||0)+(m.events.goals[entry.youthId]||0);
+      });
+    });
+  });
+  const list=Object.values(pairs).filter(p=>p.matches>=3);
+  list.forEach(p=>{p.winRate=p.matches?Math.round((p.wins/p.matches)*100):0;});
+  list.sort((a,b)=>b.winRate-a.winRate||b.matches-a.matches);
+  return list.slice(0,5);
+}
+function renderChemistryCard(db){
+  const list=computeChemistry(db);
+  return `<div class="settings-card" style="margin:0 14px 14px">
+    <div class="settings-title" style="font-size:11px">🧩 2v2 Chemistry — Best Duos</div>
+    ${list.length===0
+      ?`<div style="font-size:12px;color:var(--sub);padding:6px 0">No duo has played 3+ matches together yet — team up more in 2v2 tournaments!</div>`
+      :list.map((p,i)=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)">
+        <div style="min-width:0">
+          <div style="font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${i===0?'👑 ':''}⭐ ${p.proName} & 🌱 ${p.youthName}</div>
+          <div style="font-size:10px;color:var(--sub);margin-top:2px">${p.matches} matches together · ${p.goals} combined goals</div>
+        </div>
+        <div style="text-align:right;flex-shrink:0">
+          <div style="font-family:'Bebas Neue',sans-serif;font-size:18px;color:var(--green)">${p.winRate}%</div>
+          <div style="font-size:9px;color:var(--sub)">WIN RATE</div>
+        </div>
+      </div>`).join('')}
+  </div>`;
+}
+
+// ============================================================
+// HEAD-TO-HEAD — full history of one player against another,
+// combined across 1v1 and 2v2 matches (any match where the two
+// were on opposing sides counts; teammates in 2v2 are excluded).
+// ============================================================
+function computeHeadToHead(idA,idB,db){
+  const meetings=[];
+  let aWins=0,bWins=0,draws=0,aGoals=0,bGoals=0;
+  db.tournaments.forEach(t=>{
+    (t.matches||[]).forEach(m=>{
+      let sideA=null,sideB=null;
+      if(t.type==='1v1'){
+        if(m.aId===idA)sideA='A';else if(m.bId===idA)sideA='B';
+        if(m.aId===idB)sideB='A';else if(m.bId===idB)sideB='B';
+      } else {
+        const tA=t.standings.find(s=>s.id===m.aId),tB=t.standings.find(s=>s.id===m.bId);
+        if(tA&&(tA.proId===idA||tA.youthId===idA))sideA='A';
+        else if(tB&&(tB.proId===idA||tB.youthId===idA))sideA='B';
+        if(tA&&(tA.proId===idB||tA.youthId===idB))sideB='A';
+        else if(tB&&(tB.proId===idB||tB.youthId===idB))sideB='B';
+      }
+      if(!sideA||!sideB||sideA===sideB)return;
+      const aTeamScore=sideA==='A'?m.goalsA:m.goalsB;
+      const bTeamScore=sideA==='A'?m.goalsB:m.goalsA;
+      let result='D';
+      if(aTeamScore>bTeamScore){aWins++;result='W';}
+      else if(aTeamScore<bTeamScore){bWins++;result='L';}
+      else draws++;
+      aGoals+=(m.events&&m.events.goals&&m.events.goals[idA])||0;
+      bGoals+=(m.events&&m.events.goals&&m.events.goals[idB])||0;
+      meetings.push({ts:m.ts,aTeamScore,bTeamScore,result,tName:t.name});
+    });
+  });
+  meetings.sort((a,b)=>a.ts-b.ts);
+  return{meetings,totalMeetings:meetings.length,aWins,bWins,draws,aGoals,bGoals};
+}
+function openH2HModal(){
+  const db=getDB();
+  const eligible=db.players.filter(p=>p.status!=='banned');
+  const opts=eligible.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+  document.getElementById('h2h-body').innerHTML=`
+    <div class="field"><label>Player 1</label><select id="h2h-a" class="select-field" onchange="renderH2HResult()"><option value="">— Select —</option>${opts}</select></div>
+    <div class="field"><label>Player 2</label><select id="h2h-b" class="select-field" onchange="renderH2HResult()"><option value="">— Select —</option>${opts}</select></div>
+    <div id="h2h-result"></div>`;
+  document.getElementById('modal-h2h').classList.add('active');
+}
+function renderH2HResult(){
+  const db=getDB();
+  const aId=document.getElementById('h2h-a').value;
+  const bId=document.getElementById('h2h-b').value;
+  const res=document.getElementById('h2h-result');
+  if(!aId||!bId){res.innerHTML='';return}
+  if(aId===bId){res.innerHTML='<div style="font-size:12px;color:var(--red);text-align:center;padding:10px 0">Pick two different players.</div>';return}
+  const a=db.players.find(x=>x.id===aId),b=db.players.find(x=>x.id===bId);
+  if(!a||!b)return;
+  const h2h=computeHeadToHead(aId,bId,db);
+  if(h2h.totalMeetings===0){
+    res.innerHTML=`<div style="text-align:center;padding:24px 0;color:var(--sub);font-size:13px">${a.name} and ${b.name} have never faced each other yet.</div>`;
+    return;
+  }
+  const recentHtml=h2h.meetings.slice(-8).reverse().map(m=>{
+    const resColor=m.result==='W'?'var(--green)':m.result==='L'?'var(--red)':'var(--sub)';
+    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)">
+      <div style="font-size:11px;color:var(--sub);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.tName}</div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:16px;color:${resColor}">${m.aTeamScore}–${m.bTeamScore}</div>
+      <div style="font-size:9px;color:var(--sub);width:56px;text-align:right;flex-shrink:0">${timeAgo(m.ts)}</div>
+    </div>`;
+  }).join('');
+  res.innerHTML=`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 14px">
+      <div style="text-align:center;flex:1"><div class="pav" style="width:52px;height:52px;margin:0 auto 6px;font-size:16px">${a.photo?`<img src="${a.photo}">`:initials(a.name)}</div><div style="font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${a.name}</div></div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:20px;color:var(--sub);flex-shrink:0;padding:0 8px">VS</div>
+      <div style="text-align:center;flex:1"><div class="pav" style="width:52px;height:52px;margin:0 auto 6px;font-size:16px">${b.photo?`<img src="${b.photo}">`:initials(b.name)}</div><div style="font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${b.name}</div></div>
+    </div>
+    <div class="stat-grid" style="grid-template-columns:1fr 1fr 1fr;gap:6px">
+      <div class="stat-cell"><div class="stat-val" style="color:var(--green);font-size:24px">${h2h.aWins}</div><div class="stat-lbl">${a.name} Wins</div></div>
+      <div class="stat-cell"><div class="stat-val" style="font-size:24px">${h2h.draws}</div><div class="stat-lbl">Draws</div></div>
+      <div class="stat-cell"><div class="stat-val" style="color:var(--green);font-size:24px">${h2h.bWins}</div><div class="stat-lbl">${b.name} Wins</div></div>
+    </div>
+    <div style="display:flex;justify-content:space-around;margin:12px 0;font-size:12px;color:var(--sub)">
+      <span>⚽ ${a.name}: <strong style="color:var(--gold)">${h2h.aGoals}</strong></span>
+      <span>⚽ ${b.name}: <strong style="color:var(--gold)">${h2h.bGoals}</strong></span>
+    </div>
+    <div style="font-size:10px;font-weight:700;letter-spacing:1.5px;color:var(--sub);margin:14px 0 8px;text-transform:uppercase">Recent Meetings (${h2h.totalMeetings} total)</div>
+    ${recentHtml}`;
+}
+
 function renderHistory(){
   const db=getDB();const el=document.getElementById('tab-history');
   const sorted=[...db.players].sort((a,b)=>{const eloA=a.stats?.elo||1000,eloB=b.stats?.elo||1000;if(eloB!==eloA)return eloB-eloA;return(b.stats?.points||0)-(a.stats?.points||0);});
   if(sorted.length===0){el.innerHTML=`<div class="empty-state"><div class="empty-ico">🏛️</div><div class="empty-txt">Hall of Fame is empty.<br>Complete a tournament to fill it.</div></div>`;return;}
   el.innerHTML=`<div class="sec-hdr"><div class="sec-ttl">👑 Hall of Fame (Global Rank)</div>
-    <button onclick="openCompareModal()" style="display:flex;align-items:center;gap:4px;background:rgba(240,180,41,0.1);border:1px solid rgba(240,180,41,0.25);border-radius:9px;padding:7px 13px;font-family:'Rajdhani',sans-serif;font-size:12px;font-weight:700;color:var(--gold);cursor:pointer">⚖️ COMPARE</button>
+    <div style="display:flex;gap:6px">
+      <button onclick="openH2HModal()" style="display:flex;align-items:center;gap:4px;background:rgba(77,171,247,0.1);border:1px solid rgba(77,171,247,0.25);border-radius:9px;padding:7px 11px;font-family:'Rajdhani',sans-serif;font-size:12px;font-weight:700;color:var(--blue);cursor:pointer">⚔️ H2H</button>
+      <button onclick="openCompareModal()" style="display:flex;align-items:center;gap:4px;background:rgba(240,180,41,0.1);border:1px solid rgba(240,180,41,0.25);border-radius:9px;padding:7px 13px;font-family:'Rajdhani',sans-serif;font-size:12px;font-weight:700;color:var(--gold);cursor:pointer">⚖️ COMPARE</button>
+    </div>
   </div>
   ${renderLeagueRecords(db)}
+  ${renderChemistryCard(db)}
   <div class="hof-list">
     ${sorted.map((p,i)=>{
       const s=p.stats||{};const xp=s.xp||0;const lvl=getLevelFromXP(xp);const lvlTitle=getLevelTitle(lvl);const elo=s.elo||1000;const pIdx=db.players.indexOf(p);
@@ -3311,7 +3894,9 @@ async function refreshData() {
             marketValue: p.market_value || 500000,
             previousMarketValue: p.previous_market_value ?? null,
             marketValueHistory: p.market_value_history ?? [],
-            status: p.status || 'active'
+            status: p.status || 'active',
+            bio: p.bio || '', position: p.position || '', preferredFoot: p.preferred_foot || '',
+            age: p.age ?? null, jerseyNumber: p.jersey_number ?? null, favoriteTeam: p.favorite_team || ''
         }));
 
         if(tRes.data) {
@@ -3324,7 +3909,9 @@ async function refreshData() {
                 bracket: t.bracket || null,
                 groups: t.groups || null,
                 autoQualify: t.auto_qualify || false,
-                archivedAt: t.archived_at || null
+                archivedAt: t.archived_at || null,
+                category: t.category || 'official',
+                banner: t.banner || '', logo: t.logo || '', themeColor: t.theme_color || '#f0b429'
             })).sort((a,b) => b.id - a.id); 
         }
 
@@ -3403,9 +3990,10 @@ function recordMarketValueHistory(p){
     if(p.marketValueHistory.length>60)p.marketValueHistory=p.marketValueHistory.slice(-60);
 }
 
-function updatePlayerMarketValue(db, pid, matchData) {
+function updatePlayerMarketValue(db, pid, matchData, applyReward=true) {
     const p = db.players.find(x => x.id === pid);
     if(!p) return;
+    if(!applyReward) return; // Qualifier/Friendly tournaments: no market-value reward
     
     let val = p.marketValue || 500000; // Default starting price is 500k
     p.previousMarketValue = val;
@@ -3429,9 +4017,64 @@ function updatePlayerMarketValue(db, pid, matchData) {
     recordMarketValueHistory(p);
 }
 
+// ============================================================
+// TOURNAMENT CATEGORY — Official tournaments grant full rewards
+// (trophy, golden boot, market value changes). Qualifier/Friendly
+// tournaments still count toward XP, ELO, goals, cards and match
+// history, but grant no cup, no golden boot, and no market-value
+// changes. Legacy tournaments with no category are treated as Official.
+// ============================================================
+function isRewardTournament(t){
+    return !t || !t.category || t.category==='official';
+}
+
+// ============================================================
+// TOURNAMENT MVP ENGINE — awarded automatically when an Official
+// tournament ends. Score = (goals×3) + (wins×2) + (MOTM awards×5),
+// computed purely from this tournament's own matches. A player must
+// have played at least 3 matches in the tournament to be eligible
+// (stops a 1-match hat-trick beating someone who played the whole
+// cup). Ties are broken by most goals scored in the tournament.
+// Official tournaments only — Qualifier/Friendly never award this.
+// ============================================================
+function computeTournamentMVP(t,db){
+  if(!isRewardTournament(t))return null;
+  const stat={};
+  const ensure=pid=>{ if(!stat[pid])stat[pid]={matches:0,goals:0,wins:0,motm:0}; return stat[pid]; };
+  (t.matches||[]).forEach(m=>{
+    const events=m.events||{goals:{},cards:{}};
+    const tA=t.standings.find(s=>s.id===m.aId);
+    const tB=t.standings.find(s=>s.id===m.bId);
+    Object.keys(events.goals||{}).forEach(pid=>{
+      const st=ensure(pid);
+      st.matches++;
+      st.goals+=events.goals[pid]||0;
+      const isTeamA=t.type==='1v1'?pid===m.aId:(tA&&(pid===tA.proId||pid===tA.youthId));
+      const isTeamB=t.type==='1v1'?pid===m.bId:(tB&&(pid===tB.proId||pid===tB.youthId));
+      const won=(isTeamA&&m.goalsA>m.goalsB)||(isTeamB&&m.goalsB>m.goalsA);
+      if(won)st.wins++;
+    });
+    if(m.motm){
+      const mvpPlayer=db.players.find(x=>x.name===m.motm);
+      if(mvpPlayer)ensure(mvpPlayer.id).motm++;
+    }
+  });
+  let best=null,bestScore=-Infinity,bestGoals=-1;
+  Object.keys(stat).forEach(pid=>{
+    const st=stat[pid];
+    if(st.matches<3)return;
+    const score=st.goals*3+st.wins*2+st.motm*5;
+    if(score>bestScore||(score===bestScore&&st.goals>bestGoals)){
+      bestScore=score;bestGoals=st.goals;best={pid,score,...st};
+    }
+  });
+  return best;
+}
+
 function awardMotmValue(db, pid) {
     const p = db.players.find(x => x.id === pid);
     if(p) {
+        p.previousMarketValue = p.marketValue || 500000;
         p.marketValue = (p.marketValue || 500000) + 200000; // MOTM gets +200k bonus
         recordMarketValueHistory(p);
     }
@@ -3444,24 +4087,36 @@ function awardMotmValue(db, pid) {
 // end up stuck in the code.
 // ============================================================
 const MUSIC_BUCKET='music';
-const MUSIC_FOLDER='Untitled folder';
 let playlist=[];
 let playlistLoaded=false;
 let playlistLoadingPromise=null;
 let currentSong=0;
 let bgMusic=null;
 
+// Scans the bucket root AND one level of sub-folders for audio files,
+// instead of hardcoding a folder name — so renaming/reorganizing the
+// folder in Supabase Storage can never silently break the playlist again.
 async function loadPlaylist(){
     if(playlistLoaded)return playlist;
     if(playlistLoadingPromise)return playlistLoadingPromise;
     playlistLoadingPromise=(async()=>{
         try{
-            const{data,error}=await supabaseClient.storage.from(MUSIC_BUCKET).list(MUSIC_FOLDER,{limit:200,sortBy:{column:'name',order:'asc'}});
-            if(error)throw error;
             const audioExt=/\.(mp3|wav|m4a|ogg|aac)$/i;
-            playlist=(data||[])
-                .filter(f=>f&&f.name&&f.id&&audioExt.test(f.name)) // f.id is null for sub-folder placeholders
-                .map(f=>supabaseClient.storage.from(MUSIC_BUCKET).getPublicUrl(`${MUSIC_FOLDER}/${f.name}`).data.publicUrl);
+            const urls=[];
+            const scan=async(path)=>{
+                const{data,error}=await supabaseClient.storage.from(MUSIC_BUCKET).list(path,{limit:200,sortBy:{column:'name',order:'asc'}});
+                if(error||!data)return;
+                for(const f of data){
+                    const fullPath=path?`${path}/${f.name}`:f.name;
+                    if(f.id===null){ // a sub-folder placeholder — go one level deeper
+                        await scan(fullPath);
+                    } else if(audioExt.test(f.name)){
+                        urls.push(supabaseClient.storage.from(MUSIC_BUCKET).getPublicUrl(fullPath).data.publicUrl);
+                    }
+                }
+            };
+            await scan('');
+            playlist=urls;
             playlistLoaded=true;
         }catch(e){
             console.error('Playlist load failed',e);

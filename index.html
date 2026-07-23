@@ -107,7 +107,10 @@
   <div id="tab-arena" class="tab-content">
     <div class="sec-hdr">
       <div class="sec-ttl">🏟️ The Arena</div>
-      <button id="create-btn" onclick="openCreate()" style="display:none;align-items:center;gap:4px;background:linear-gradient(135deg,var(--gold),var(--gold2));border:none;border-radius:9px;padding:8px 15px;font-family:'Rajdhani',sans-serif;font-size:13px;font-weight:700;color:#000;cursor:pointer;letter-spacing:0.5px">➕ CREATE</button>
+      <div style="display:flex;gap:6px">
+        <button id="challenge-btn" onclick="openFriendlyChallenge()" style="display:none;align-items:center;gap:4px;background:rgba(240,180,41,0.1);border:1px solid rgba(240,180,41,0.3);border-radius:9px;padding:8px 12px;font-family:'Rajdhani',sans-serif;font-size:13px;font-weight:700;color:var(--gold);cursor:pointer;letter-spacing:0.5px">🤝 CHALLENGE</button>
+        <button id="create-btn" onclick="openCreate()" style="display:none;align-items:center;gap:4px;background:linear-gradient(135deg,var(--gold),var(--gold2));border:none;border-radius:9px;padding:8px 15px;font-family:'Rajdhani',sans-serif;font-size:13px;font-weight:700;color:#000;cursor:pointer;letter-spacing:0.5px">➕ CREATE</button>
+      </div>
     </div>
     <!-- NEWS FEED -->
     <div id="news-feed-wrap" style="padding:0 14px 14px">
@@ -311,12 +314,55 @@
   </div>
 </div>
 
+<!-- MODAL: QUICK FRIENDLY CHALLENGE -->
+<div id="modal-challenge" class="modal-ov" onclick="if(event.target===this)closeModal('modal-challenge')">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">🤝 Friendly Challenge</div>
+    <div style="font-size:12px;color:var(--sub);margin-bottom:14px;line-height:1.6">Quick 1v1 match between two players — counts toward XP, ELO, goals, cards and history. No cup, no golden boot, no market value change.</div>
+    <div id="challenge-body"></div>
+    <div id="challenge-err" class="err-msg"></div>
+    <button class="btn btn-gold" onclick="createFriendlyChallenge()">🤝 START CHALLENGE</button>
+  </div>
+</div>
+
 <!-- MODAL: CREATE -->
 <div id="modal-create" class="modal-ov" onclick="if(event.target===this)closeModal('modal-create')">
   <div class="modal">
     <div class="modal-handle"></div>
     <div class="modal-title">➕ Create Tournament</div>
     <div class="field"><label>Cup Name</label><input id="cup-name" type="text" placeholder="e.g. Champions Cup 2025"></div>
+    <div class="field"><label>Category</label>
+      <div class="format-row" id="category-row">
+        <div class="f-opt sel" data-val="official" onclick="setCreate('category',this)">🏆 Official</div>
+        <div class="f-opt" data-val="qualifier" onclick="setCreate('category',this)">🎯 Qualifier</div>
+        <div class="f-opt" data-val="friendly" onclick="setCreate('category',this)">🤝 Friendly</div>
+      </div>
+      <div id="category-hint" style="font-size:11px;color:var(--sub);margin-top:6px;line-height:1.5">🏆 Official = full rewards (trophy, golden boot, market value changes). 🎯 Qualifier / 🤝 Friendly = counts toward XP, ELO, goals, cards and history — but no cup, no golden boot, no market value changes.</div>
+    </div>
+    <div class="field"><label>Tournament Look (optional)</label>
+      <div class="photo-row">
+        <div class="photo-preview" id="create-banner-prev" style="width:76px;height:48px;border-radius:10px" onclick="document.getElementById('create-banner-file').click()">🖼️</div>
+        <div><div style="font-size:14px;font-weight:600">Banner</div><div style="font-size:11px;color:var(--sub);margin-top:2px">A wide image looks best</div></div>
+      </div>
+      <input type="file" id="create-banner-file" accept="image/*" style="display:none" onchange="handleBannerPhoto(this)">
+      <input type="hidden" id="create-banner-data">
+      <div class="photo-row" style="margin-top:10px">
+        <div class="photo-preview" id="create-logo-prev" onclick="document.getElementById('create-logo-file').click()">🏷️</div>
+        <div><div style="font-size:14px;font-weight:600">Logo</div><div style="font-size:11px;color:var(--sub);margin-top:2px">A small square badge</div></div>
+      </div>
+      <input type="file" id="create-logo-file" accept="image/*" style="display:none" onchange="handlePhoto(this,'create-logo-prev','create-logo-data')">
+      <input type="hidden" id="create-logo-data">
+      <div style="font-size:9px;font-weight:700;letter-spacing:1.5px;color:var(--sub);text-transform:uppercase;margin:12px 0 8px">Theme Color</div>
+      <div id="theme-color-row" style="display:flex;gap:10px;flex-wrap:wrap">
+        <div class="theme-swatch sel" data-color="#f0b429" style="background:#f0b429" onclick="setThemeColor('#f0b429',this)"></div>
+        <div class="theme-swatch" data-color="#4dabf7" style="background:#4dabf7" onclick="setThemeColor('#4dabf7',this)"></div>
+        <div class="theme-swatch" data-color="#06d77b" style="background:#06d77b" onclick="setThemeColor('#06d77b',this)"></div>
+        <div class="theme-swatch" data-color="#ff4757" style="background:#ff4757" onclick="setThemeColor('#ff4757',this)"></div>
+        <div class="theme-swatch" data-color="#a855f7" style="background:#a855f7" onclick="setThemeColor('#a855f7',this)"></div>
+        <div class="theme-swatch" data-color="#ff9f43" style="background:#ff9f43" onclick="setThemeColor('#ff9f43',this)"></div>
+      </div>
+    </div>
     <div class="field"><label>Format</label>
       <div class="format-row" id="format-row">
         <div class="f-opt sel" data-val="league" onclick="setCreate('format',this)">🏅 League</div>
@@ -384,6 +430,15 @@
     <div id="motm-body"></div>
     <div id="motm-err" class="err-msg"></div>
     <button class="btn btn-gold" onclick="submitMotmVote()" style="margin-top:14px">✅ SUBMIT RATINGS</button>
+  </div>
+</div>
+
+<!-- MODAL: HEAD-TO-HEAD -->
+<div id="modal-h2h" class="modal-ov" onclick="if(event.target===this)closeModal('modal-h2h')">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">⚔️ Head-to-Head</div>
+    <div id="h2h-body"></div>
   </div>
 </div>
 
