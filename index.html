@@ -123,7 +123,7 @@
         <div class="f-opt sel" data-val="all" onclick="setArenaFilter(this)">All</div>
         <div class="f-opt" data-val="active" onclick="setArenaFilter(this)">Live</div>
         <div class="f-opt" data-val="ended" onclick="setArenaFilter(this)">Ended</div>
-        <div class="f-opt" data-val="archived" onclick="setArenaFilter(this)" id="arena-filter-archived" style="display:none">Archived</div>
+        <div class="f-opt" data-val="archived" onclick="setArenaFilter(this)" id="arena-filter-archived" style="display:none">Deleted</div>
       </div>
     </div>
     <div class="t-list" id="tournament-list"></div>
@@ -208,6 +208,7 @@
           • Win: <strong style="color:var(--green)">+€100K</strong> | Draw: <strong>+€25K</strong> | Loss: <strong style="color:var(--red)">-€50K</strong><br>
           • Every Goal Scored: <strong style="color:var(--green)">+€50K</strong><br>
           • Man of the Match: <strong style="color:var(--gold)">+€200K</strong><br>
+          • Yellow Card Penalty: <strong style="color:var(--gold)">-€50K</strong><br>
           • Red Card Penalty: <strong style="color:var(--red)">-€150K</strong><br>
           <em>Note: Value can never drop below €100K.</em>
         </div>
@@ -225,7 +226,7 @@
         <div class="rule-icon">🟥</div>
         <div class="rule-title">Red Cards — الطرد المباشر</div>
         <div class="rule-txt">
-          Direct red card = <strong style="color:var(--text)">1-match suspension</strong> + <strong style="color:var(--red)">−1 point deduction</strong> from the team's total points. A player is automatically banned from the app if they get 3 red cards in one tournament.
+          Direct red card = <strong style="color:var(--text)">1-match suspension</strong> + <strong style="color:var(--red)">−1 point deduction</strong> from the team's total points. If a player collects more than 3 red cards <strong>within one tournament</strong>, they are automatically <strong style="color:var(--red)">suspended from that tournament only</strong> — they can still log in and play in other tournaments normally. This is different from a <strong>Ban</strong>, which is a permanent, admin-only removal from the app.
         </div>
       </div>
 
@@ -233,7 +234,7 @@
         <div class="rule-icon">🏳️</div>
         <div class="rule-title">Walkover — الانسحاب</div>
         <div class="rule-txt">
-          If a player/team refuses to show up or withdraws, the Admin applies a Walkover from the <strong>Record Match Result</strong> screen ("Home Withdrew" / "Away Withdrew" buttons). This locks in an automatic <strong style="color:var(--red)">3 - 0 Loss</strong> for whoever withdrew — the opponent gets the full 3 points, the win, and the 3 goals as normal.
+          If a player/team refuses to show up or withdraws, the Admin applies a Walkover from the <strong>Record Match Result</strong> screen ("Home Withdrew" / "Away Withdrew" buttons). This locks in an automatic <strong style="color:var(--red)">3 - 0 Loss</strong> for whoever withdrew — the opponent gets the full 3 points and the win for the tournament standings, but the 3 goals do NOT count toward personal goal stats, goal XP, or Market Value (since no goals were actually scored).
         </div>
       </div>
 
@@ -242,6 +243,18 @@
         <div class="rule-title">Top 2 Advantage — ميزة الأول والثاني</div>
         <div class="rule-txt">
           الأول والثاني في الدوري <strong style="color:var(--blue)">يمكنهم دعوة أي لاعب</strong> يلعب معهم لمدة هدفين له أو عليه كنوع من المساعدة التكتيكية.
+        </div>
+      </div>
+
+      <div class="rule-card gc">
+        <div class="rule-icon">🏅</div>
+        <div class="rule-title">Achievement Badges — الشارات</div>
+        <div class="rule-txt">
+          • <strong>🎩 Hat-Trick</strong>: score 3+ goals in a single match<br>
+          • <strong>🎯 Sniper</strong>: reach 50 career goals<br>
+          • <strong>💯 Century Club</strong>: reach 100 career goals<br>
+          • <strong>🎖️ Veteran</strong>: play 50 total matches<br>
+          • <strong>🏆 Serial Competitor</strong>: compete in 10 cups
         </div>
       </div>
 
@@ -307,7 +320,7 @@
         <button id="btn-edit-last" class="rec-btn" style="display:none;background:linear-gradient(135deg,rgba(240,180,41,0.12),rgba(240,180,41,0.04));border-color:var(--gold);color:var(--gold)" onclick="editLastMatch()">✏️ EDIT LAST MATCH</button>
         <button id="btn-qualify" class="rec-btn" onclick="qualifyToKnockout()" style="display:none;background:linear-gradient(135deg,rgba(77,171,247,0.12),rgba(77,171,247,0.04));border-color:var(--blue);color:var(--blue);">⚡ QUALIFY TOP PLAYERS</button>
         <button id="btn-end" class="end-btn" onclick="confirmEnd()">🔴 END CUP & AWARD TROPHY</button>
-        <button id="btn-archive-t" class="btn btn-gold" style="margin-top:10px;width:100%" onclick="toggleArchiveTournament()">📦 ARCHIVE TOURNAMENT</button>
+        <button id="btn-archive-t" class="btn btn-gold" style="margin-top:10px;width:100%" onclick="toggleArchiveTournament()">🗑️ SEND TO RECENTLY DELETED</button>
         <button class="btn btn-ghost" style="color:var(--red); border-color:rgba(255,71,87,0.3); margin-top:10px; width:100%" onclick="deleteTournament()">🗑️ DELETE TOURNAMENT (ADMIN ONLY)</button>
       </div>
     </div>
