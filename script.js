@@ -459,7 +459,10 @@ function renderUserBadge(){
     const db=getDB();const p=db.players.find(x=>x.id===currentUser.id);
     const xp=p?.stats?.xp||0;const lvl=getLevelFromXP(xp);
     const avEl=p?.photo?`<div class="uav"><img src="${p.photo}" loading="lazy"></div>`:`<div class="uav">${initials(currentUser.name)}</div>`;
-    el.innerHTML=`${avEl}<span style="font-size:13px">${currentUser.name}</span><span class="lvl-badge">LVL ${lvl}</span>`;
+    const streak=p?.stats?.winStreak||0;
+    const streakBadge=streak>=3?`<span title="${streak}-match win streak" style="font-size:12px">🔥${streak}</span>`:'';
+    const questBadge=(p?.stats?.dailyQuestDate===todayStr()&&(p.stats.dailyQuestCompleted||[]).length>0)?`<span title="Completed a daily quest today" style="font-size:9px;background:rgba(240,180,41,0.15);color:var(--gold);border:1px solid rgba(240,180,41,0.3);border-radius:5px;padding:1px 5px;font-weight:700">🎯</span>`:'';
+    el.innerHTML=`${avEl}<span style="font-size:13px">${currentUser.name}</span>${streakBadge}${questBadge}<span class="lvl-badge">LVL ${lvl}</span>`;
   }
 }
 
@@ -822,22 +825,46 @@ function renderArena(){
     const bannerHtml=t.banner?`<div style="margin:-18px -18px 12px;height:68px;background-image:url('${t.banner}');background-size:cover;background-position:center;border-radius:16px 16px 0 0"></div>`:'';
     const logoHtml=t.logo?`<img src="${t.logo}" style="width:22px;height:22px;border-radius:6px;object-fit:cover;margin-right:6px;flex-shrink:0;vertical-align:middle">`:'';
     const cardStyleAttr=t.themeColor?` style="--gold:${t.themeColor}"`:'';
-    return `<div class="t-card" onclick="openTournament(${i})"${cardStyleAttr}>
+    const nemesis=findNextMatchNemesis(t,db);
+    const nemesisClass=nemesis?' nemesis-flash':'';
+    const nemesisTag=nemesis?`<div style="font-size:9px;font-weight:800;color:#fff;background:var(--red);padding:2px 8px;border-radius:20px;margin-top:6px;display:inline-block;letter-spacing:0.5px">⚔️ REVENGE MATCH</div>`:'';
+    return `<div class="t-card${nemesisClass}" onclick="openTournament(${i})"${cardStyleAttr}>
       ${bannerHtml}
       <div class="t-card-top"><div style="display:flex;align-items:center">${badge}${catTag}</div><div class="av-stack">${buildAvatarStack(t,db)}</div></div>
       <div class="t-name" style="display:flex;align-items:center">${logoHtml}<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.name}</span></div>
       <div class="t-meta">${t.type.toUpperCase()} · ${formatLabel(t)} · ${t.participants.length} ${t.type==='2v2'?'teams':'players'}</div>
+      ${nemesisTag}
     </div>`;
   }).join(''));
 }
 
+function findNextMatchNemesis(t,db){
+  if(t.type!=='1v1'||t.status!=='active')return null;
+  let aId=null,bId=null;
+  if((t.phase==='group'||t.phase==='groups')&&t.schedule){
+    const next=t.schedule.find(m=>!m.played);
+    if(next){aId=next.aId;bId=next.bId;}
+  } else if(t.bracket){
+    for(const round of t.bracket){
+      for(const m of round){
+        if(!m.winner&&m.p1&&m.p2){aId=m.p1;bId=m.p2;break;}
+      }
+      if(aId)break;
+    }
+  }
+  if(!aId||!bId)return null;
+  return getNemesisStatus(aId,bId,db);
+}
+
 function buildAvatarStack(t,db){
   const MAX=4;
+  const streakBadge=streak=>streak>=3?`<span style="position:absolute;bottom:-2px;right:-2px;font-size:9px">🔥</span>`:'';
   return t.participants.slice(0,MAX).map(p=>{
-    if(t.type==='2v2')return`<div class="av-circle">${(p.proName||p.name||'?').slice(0,2).toUpperCase()}</div>`;
+    if(t.type==='2v2')return`<div class="av-circle" style="position:relative">${(p.proName||p.name||'?').slice(0,2).toUpperCase()}</div>`;
     const player=db.players.find(x=>x.id===p);
     if(!player)return`<div class="av-circle">?</div>`;
-    return player.photo?`<div class="av-circle"><img src="${player.photo}"></div>`:`<div class="av-circle">${initials(player.name)}</div>`;
+    const badge=streakBadge(player.stats?.winStreak||0);
+    return player.photo?`<div class="av-circle" style="position:relative"><img src="${player.photo}">${badge}</div>`:`<div class="av-circle" style="position:relative">${initials(player.name)}${badge}</div>`;
   }).join('')+(t.participants.length>MAX?`<div class="av-circle">+${t.participants.length-MAX}</div>`:'');
 }
 
@@ -1198,15 +1225,42 @@ async function createTournament(){
 }
 
 // Generate all round-robin matchups (each pair plays twice)
+// Circle-method round-robin: splits N players into fair "matchdays" where
+// every player appears at most once per round, instead of naively pairing
+// player 1 against everyone before moving to player 2 (which is unrealistic
+// and unfair — some players wait ages while others play back-to-back).
+function circleMethodRounds(ids){
+  let players=[...ids];
+  if(players.length%2!==0)players.push(null); // bye slot for odd counts
+  const n=players.length;
+  const fixed=players[0];
+  let rotating=players.slice(1);
+  const rounds=[];
+  for(let r=0;r<n-1;r++){
+    const roundPlayers=[fixed,...rotating];
+    const round=[];
+    for(let i=0;i<n/2;i++){
+      const a=roundPlayers[i], b=roundPlayers[n-1-i];
+      if(a!==null&&b!==null)round.push({aId:a,bId:b});
+    }
+    rounds.push(round);
+    rotating.unshift(rotating.pop());
+  }
+  return rounds;
+}
+
 function generateRoundRobin(standings,type,legs=2){
   legs=legs===1?1:2;
   const ids=standings.map(s=>s.id);
+  const rounds=circleMethodRounds(ids);
   const schedule=[];
-  for(let i=0;i<ids.length;i++){
-    for(let j=i+1;j<ids.length;j++){
-      schedule.push({aId:ids[i],bId:ids[j],leg:1,played:false});
-      if(legs===2)schedule.push({aId:ids[j],bId:ids[i],leg:2,played:false});
-    }
+  rounds.forEach((round,ri)=>{
+    round.forEach(({aId,bId})=>schedule.push({aId,bId,leg:1,played:false,round:ri}));
+  });
+  if(legs===2){
+    rounds.forEach((round,ri)=>{
+      round.forEach(({aId,bId})=>schedule.push({aId:bId,bId:aId,leg:2,played:false,round:rounds.length+ri}));
+    });
   }
   return schedule;
 }
@@ -1216,12 +1270,14 @@ function generateGroupSchedules(groups,legs){
   legs=legs===1?1:2;
   const schedule=[];
   groups.forEach((g,gi)=>{
-    const ids=g.ids;
-    for(let i=0;i<ids.length;i++){
-      for(let j=i+1;j<ids.length;j++){
-        schedule.push({aId:ids[i],bId:ids[j],leg:1,played:false,group:gi});
-        if(legs===2)schedule.push({aId:ids[j],bId:ids[i],leg:2,played:false,group:gi});
-      }
+    const rounds=circleMethodRounds(g.ids);
+    rounds.forEach((round,ri)=>{
+      round.forEach(({aId,bId})=>schedule.push({aId,bId,leg:1,played:false,group:gi,round:ri}));
+    });
+    if(legs===2){
+      rounds.forEach((round,ri)=>{
+        round.forEach(({aId,bId})=>schedule.push({aId:bId,bId:aId,leg:2,played:false,group:gi,round:rounds.length+ri}));
+      });
     }
   });
   return schedule;
@@ -3276,11 +3332,14 @@ function renderLocker(){
       const xpThisLevel=lvl>1?xpForLevel(lvl):0;const xpNextLevel=xpForLevel(lvl+1);
       const xpPct=lvl>=100?100:Math.round(((xp-xpThisLevel)/(xpNextLevel-xpThisLevel))*100);
       const starHTML=[1,2,3,4,5].map(n=>`<button class="star-b ${stars>=n?'lit':''}" onclick="${isAdmin?`setStar(${i},${n})`:'void(0)'}" ${isAdmin?'':'disabled'}>⭐</button>`).join('');
+      const streak=p.stats?.winStreak||0;
+      const streakBadge=streak>=3?`<span title="${streak}-match win streak" style="font-size:11px;margin-left:4px">🔥${streak}</span>`:'';
+      const questBadge=(p.stats?.dailyQuestDate===todayStr()&&(p.stats.dailyQuestCompleted||[]).length>0)?`<span title="Completed a daily quest today" style="font-size:9px;background:rgba(240,180,41,0.15);color:var(--gold);border:1px solid rgba(240,180,41,0.3);border-radius:5px;padding:1px 5px;margin-left:5px;font-weight:700">🎯 ${p.stats.dailyQuestCompleted.length}</span>`:'';
       
       return `<div class="player-card" style="${opacityStyle} ${dashStyle}">
         <div class="pav" style="cursor:pointer" onclick="openProfile(${i},${currentUser?.id===p.id})">${p.photo?`<img src="${p.photo}" loading="lazy">`:`${initials(p.name)}`}</div>
         <div class="p-info" style="cursor:pointer" onclick="openProfile(${i},${currentUser?.id===p.id})">
-          <div class="p-name">${p.name} ${isSuspendedInActiveTournament(p.id,db) ? '<span style="background:var(--red); color:#fff; font-size:9px; padding:2px 6px; border-radius:4px; font-weight:bold; margin-left:5px">🟥 SUSPENDED</span>' : ''} <span class="lvl-badge">LVL ${lvl}</span><span class="tier-chip ${tier==='pro'?'tc-pro':'tc-youth'}">${tier==='pro'?'⭐ PRO':'🌱 YOUTH'}</span></div>
+          <div class="p-name">${p.name}${streakBadge}${questBadge} ${isSuspendedInActiveTournament(p.id,db) ? '<span style="background:var(--red); color:#fff; font-size:9px; padding:2px 6px; border-radius:4px; font-weight:bold; margin-left:5px">🟥 SUSPENDED</span>' : ''} <span class="lvl-badge">LVL ${lvl}</span><span class="tier-chip ${tier==='pro'?'tc-pro':'tc-youth'}">${tier==='pro'?'⭐ PRO':'🌱 YOUTH'}</span></div>
           <div class="p-id">${p.id}</div>
           <div class="star-row">${starHTML}</div>
           <div class="xp-bar-wrap"><div class="xp-bar" style="width:${xpPct}%"></div></div>

@@ -130,6 +130,12 @@ body{display:flex;justify-content:center;align-items:stretch;font-family:'Rajdha
 /* TOURNAMENT CARDS */
 .t-list{padding:0 14px;display:flex;flex-direction:column;gap:14px}
 .t-card{background:var(--card);border-radius:var(--radius);padding:18px;border:1px solid var(--border);cursor:pointer;transition:all 0.2s;position:relative;overflow:hidden}
+.t-card.nemesis-flash{ animation: nemesisFlash 1.6s infinite; }
+@keyframes nemesisFlash {
+  0% { border-color: var(--border); box-shadow: 0 0 6px rgba(255,71,87,0.1); }
+  50% { border-color: var(--red); box-shadow: 0 0 22px rgba(255,71,87,0.5); }
+  100% { border-color: var(--border); box-shadow: 0 0 6px rgba(255,71,87,0.1); }
+}
 .t-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--gold),var(--gold2),transparent)}
 .t-card:active{transform:scale(0.985)}
 .t-card-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:13px}
