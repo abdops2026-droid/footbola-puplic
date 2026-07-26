@@ -41,7 +41,7 @@ async function saveDB(db) {
         id: t.id, name: t.name, format: t.format, type: t.type, status: t.status,
         participants: t.participants, standings: t.standings, matches: t.matches,
         phase: t.phase, schedule: t.schedule, bracket: t.bracket,
-        groups: t.groups, auto_qualify: t.autoQualify || false, archived_at: t.archivedAt || null, ended_at: t.endedAt || null,
+        groups: t.groups, auto_qualify: t.autoQualify || false, archived_at: t.archivedAt || null, ended_at: t.endedAt || null, active_rules: t.activeRules || [],
         category: t.category || 'official',
         banner: t.banner || '', logo: t.logo || '', theme_color: t.themeColor || '#f0b429'
     }));
@@ -80,7 +80,7 @@ async function saveSingleTournament(t) {
             id: t.id, name: t.name, format: t.format, type: t.type, status: t.status,
             participants: t.participants, standings: t.standings, matches: t.matches,
             phase: t.phase, schedule: t.schedule, bracket: t.bracket,
-            groups: t.groups, auto_qualify: t.autoQualify || false, archived_at: t.archivedAt || null, ended_at: t.endedAt || null,
+            groups: t.groups, auto_qualify: t.autoQualify || false, archived_at: t.archivedAt || null, ended_at: t.endedAt || null, active_rules: t.activeRules || [],
             category: t.category || 'official',
             banner: t.banner || '', logo: t.logo || '', theme_color: t.themeColor || '#f0b429'
         });
@@ -269,6 +269,7 @@ function handlePhoto(input,prevId,dataId){
           }
         }catch(err){
           console.error('Photo Storage upload failed, keeping Base64 fallback:',err);
+          snack('⚠️ Cloud photo upload failed — using a temporary local copy. Try uploading this photo again later to avoid storage bloat.');
         }
       },'image/jpeg',0.72);
     };
@@ -377,6 +378,7 @@ function enterApp(){
     renderUserBadge();
     showTab('arena');
     initPullToRefresh();
+    getTodaysQuests().then(()=>{ if(document.getElementById('tab-locker')?.classList.contains('active'))renderLocker(); });
     // START MUSIC — wait for the (now dynamic) playlist to finish loading
     // from Supabase before trying to play anything.
     loadPlaylist().then(list=>{ if(list.length && (!bgMusic || bgMusic.paused)) toggleMusic(); });
@@ -843,11 +845,14 @@ function buildAvatarStack(t,db){
 // CREATE TOURNAMENT
 // ============================================================
 function openCreate(){
-  cData={format:'league',type:'1v1',category:'official',selected:[],teams:[],groupCount:2,groupAssign:null,groupQualifiers:[],legs:2,bracketLegs:1,autoQualify:false,themeColor:'#f0b429'};pendingPro=null;
+  cData={format:'league',type:'1v1',category:'official',gameMode:'classic',selected:[],teams:[],groupCount:2,groupAssign:null,groupQualifiers:[],legs:2,bracketLegs:1,autoQualify:false,themeColor:'#f0b429'};pendingPro=null;
   document.getElementById('cup-name').value='';
   document.querySelectorAll('#category-row .f-opt').forEach(el=>el.classList.toggle('sel',el.dataset.val==='official'));
   document.querySelectorAll('#format-row .f-opt').forEach(el=>el.classList.toggle('sel',el.dataset.val==='league'));
   document.querySelectorAll('#type-row .f-opt').forEach(el=>el.classList.toggle('sel',el.dataset.val==='1v1'));
+  document.querySelectorAll('#gamemode-row .f-opt').forEach(el=>el.classList.toggle('sel',el.dataset.val==='classic'));
+  document.querySelectorAll('#challenge-rules-box input[type=checkbox]').forEach(cb=>cb.checked=false);
+  const rulesBox=document.getElementById('challenge-rules-box');if(rulesBox)rulesBox.style.display='none';
   document.querySelectorAll('#theme-color-row .theme-swatch').forEach(el=>el.classList.toggle('sel',el.dataset.color==='#f0b429'));
   const bannerPrev=document.getElementById('create-banner-prev');if(bannerPrev)bannerPrev.innerHTML='🖼️';
   const bannerData=document.getElementById('create-banner-data');if(bannerData)bannerData.value='';
@@ -893,6 +898,13 @@ function setCreate(prop,el){
   renderCreatePlayers();
   renderGroupConfig();
 }
+function setGameMode(mode,el){
+  el.parentElement.querySelectorAll('.f-opt').forEach(x=>x.classList.remove('sel'));
+  el.classList.add('sel');
+  cData.gameMode=mode;
+  const box=document.getElementById('challenge-rules-box');
+  if(box)box.style.display=(mode==='challenge')?'block':'none';
+}
 
 // ============================================================
 // GROUP STAGE CONFIGURATION (Create Modal)
@@ -915,8 +927,19 @@ function renderGroupConfig(){
     return;
   }
   if(cData.format!=='groups'){
-    sec.innerHTML='';
-    hint.textContent=cData.format==='league'?'🏅 Everyone plays everyone (single flat table).':'';
+    if(cData.format==='league'){
+      hint.textContent='🏅 Everyone plays everyone (single flat table).';
+      sec.innerHTML=`<div class="field"><label>Matches per Pairing</label>
+        <div class="format-row">
+          <div class="f-opt ${(cData.legs||2)===1?'sel':''}" onclick="setLegs(1,this)">Single Match</div>
+          <div class="f-opt ${(cData.legs||2)===2?'sel':''}" onclick="setLegs(2,this)">Home &amp; Away (x2)</div>
+        </div>
+        <div style="font-size:11px;color:var(--sub);margin-top:4px">Single Match: every pair only plays once, no second leg to record.</div>
+      </div>`;
+    } else {
+      sec.innerHTML='';
+      hint.textContent='';
+    }
     return;
   }
   hint.textContent='🧩 Split players into separate groups. Top players from each group advance to the knockout tree.';
@@ -1126,7 +1149,10 @@ async function createTournament(){
 
   const bannerData=document.getElementById('create-banner-data')?.value||'';
   const logoData=document.getElementById('create-logo-data')?.value||'';
-  let t={id:Date.now()+Math.floor(Math.random()*1000),name,format:cData.format,type:cData.type,category:cData.category||'official',participants,standings,matches:[],status:'active',banner:bannerData,logo:logoData,themeColor:cData.themeColor||'#f0b429'};
+  const activeRules = cData.gameMode==='challenge'
+    ? Array.from(document.querySelectorAll('#challenge-rules-box input[type=checkbox]:checked')).map(cb=>cb.dataset.rule)
+    : [];
+  let t={id:Date.now()+Math.floor(Math.random()*1000),name,format:cData.format,type:cData.type,category:cData.category||'official',participants,standings,matches:[],status:'active',banner:bannerData,logo:logoData,themeColor:cData.themeColor||'#f0b429',activeRules};
   const n=participants.length;
 
   if(cData.format==='groups'){
@@ -1150,13 +1176,13 @@ async function createTournament(){
     t.schedule=generateGroupSchedules(groups,cData.legs);
     t.autoQualify=!!cData.autoQualify;
   } else if(![2,4,8,16].includes(n)){
-    t.format='league'; t.phase='group'; t.schedule=generateRoundRobin(standings,cData.type);
+    t.format='league'; t.phase='group'; t.schedule=generateRoundRobin(standings,cData.type,cData.legs);
     snack('⚠️ Not a power of 2! Forced League format.');
   } else {
     if(cData.format==='tree'){
       t.phase='elimination'; t.bracket=generateBracket(standings.map(s=>s.id),cData.type,cData.bracketLegs||1);
     } else {
-      t.phase='group'; t.schedule=generateRoundRobin(standings,cData.type);
+      t.phase='group'; t.schedule=generateRoundRobin(standings,cData.type,cData.legs);
     }
   }
 
@@ -1172,13 +1198,14 @@ async function createTournament(){
 }
 
 // Generate all round-robin matchups (each pair plays twice)
-function generateRoundRobin(standings,type){
+function generateRoundRobin(standings,type,legs=2){
+  legs=legs===1?1:2;
   const ids=standings.map(s=>s.id);
   const schedule=[];
   for(let i=0;i<ids.length;i++){
     for(let j=i+1;j<ids.length;j++){
       schedule.push({aId:ids[i],bId:ids[j],leg:1,played:false});
-      schedule.push({aId:ids[j],bId:ids[i],leg:2,played:false});
+      if(legs===2)schedule.push({aId:ids[j],bId:ids[i],leg:2,played:false});
     }
   }
   return schedule;
@@ -1334,6 +1361,17 @@ function renderTournamentScreen(){
   const archTag=t.archivedAt?' · <span style="color:var(--sub)">📦 ARCHIVED</span>':'';
   const catTagScr=t.category==='friendly'?' · <span style="color:var(--gold)">🤝 Friendly</span>':t.category==='qualifier'?' · <span style="color:var(--blue)">🎯 Qualifier</span>':'';
   document.getElementById('t-scr-meta').innerHTML=`${t.type.toUpperCase()} · ${formatLabel(t)} · <span style="color:${t.status==='active'?'var(--green)':'var(--sub)'}">● ${t.status==='active'?'LIVE':'ENDED'}</span>${catTagScr}${archTag}`;
+  const rulesLabels={clean_sheet:'🧤 Clean Sheet',giant_slayer:'🗡️ Giant Slayer',value_freeze:'📉 Value Freeze',goal_cap:'⚽ Goal Cap',no_mercy_var:'🟥 No Mercy VAR',all_or_nothing:'⚔️ All or Nothing',elo_vampire:'🧛 ELO Vampire',double_xp:'🌟 Double XP',golden_market:'💰 Golden Market'};
+  const rulesRow=document.getElementById('t-scr-rules');
+  if(rulesRow){
+    if(t.activeRules&&t.activeRules.length>0){
+      rulesRow.style.display='flex';
+      rulesRow.innerHTML=t.activeRules.map(r=>`<span style="font-size:9px;font-weight:700;background:rgba(240,180,41,0.12);color:var(--gold);border:1px solid rgba(240,180,41,0.3);border-radius:6px;padding:2px 7px">${rulesLabels[r]||r}</span>`).join('');
+    } else {
+      rulesRow.style.display='none';
+      rulesRow.innerHTML='';
+    }
+  }
   renderNextMatch(t);
   renderStandings();
   renderMatchHistory();
@@ -1435,6 +1473,73 @@ async function qualifyGroupsToKnockout(db,t){
   renderTournamentScreen();
 }
 
+// ============================================================
+// UPCOMING MATCHES — a distinctive vertical timeline of every
+// remaining fixture in the tournament, in play order, for everyone.
+// ============================================================
+function openUpcomingMatches(){
+  const t=getTournament();if(!t)return;
+  const db=getDB();
+  const getN=id=>{const s=t.standings.find(x=>x.id===id);return s?.name||id};
+  let items=[]; // {a,b,label,sub,isNext}
+
+  if((t.phase==='group'||t.phase==='groups')&&t.schedule){
+    const upcoming=t.schedule.filter(m=>!m.played);
+    upcoming.forEach((m,i)=>{
+      const gName=(t.phase==='groups'&&t.groups&&t.groups[m.group])?t.groups[m.group].name:null;
+      items.push({
+        a:getN(m.aId), b:getN(m.bId),
+        label: gName ? `${gName} · Leg ${m.leg}` : `Matchday · Leg ${m.leg}`,
+        isNext: i===0
+      });
+    });
+  } else if(t.bracket){
+    const rNames=['Round of 32','Round of 16','Quarter-Final','Semi-Final','Final'];
+    let foundNext=false;
+    t.bracket.forEach((round,r)=>{
+      round.forEach(m=>{
+        if(m.winner)return; // already decided
+        const required=m.requiredLegs||1;
+        const legsPlayed=(m.legs||[]).length;
+        const legLabel = required>1 ? ` · Leg ${legsPlayed+1} of ${required}` : '';
+        const ready = !!(m.p1&&m.p2);
+        const isNext = ready && !foundNext;
+        if(isNext)foundNext=true;
+        items.push({
+          a: m.p1?getN(m.p1):'TBD', b: m.p2?getN(m.p2):'TBD',
+          label: (rNames[r]||`Round ${r+1}`)+legLabel,
+          isNext, tbd: !ready
+        });
+      });
+    });
+  }
+
+  const body=document.getElementById('upcoming-body');
+  if(items.length===0){
+    body.innerHTML=`<div class="empty-state"><div class="empty-ico">🎉</div><div class="empty-txt">No fixtures left — every match has been played!</div></div>`;
+  } else {
+    body.innerHTML=`<div style="position:relative;padding-left:26px">
+      <div style="position:absolute;left:9px;top:6px;bottom:6px;width:2px;background:linear-gradient(180deg,var(--gold),rgba(240,180,41,0.05))"></div>
+      ${items.map((it,i)=>`
+        <div style="position:relative;margin-bottom:${i===items.length-1?'0':'16px'}">
+          <div style="position:absolute;left:-26px;top:2px;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;
+            background:${it.isNext?'var(--gold)':'var(--card2)'};color:${it.isNext?'#000':'var(--sub)'};border:2px solid ${it.isNext?'var(--gold)':'var(--border)'};z-index:1">${i+1}</div>
+          <div style="background:${it.isNext?'linear-gradient(135deg,rgba(240,180,41,0.14),rgba(240,180,41,0.03))':'var(--card)'};border:1px solid ${it.isNext?'var(--gold)':'var(--border)'};border-radius:10px;padding:10px 14px;${it.tbd?'opacity:0.5':''}">
+            ${it.isNext?'<div style="font-size:9px;font-weight:800;color:var(--gold);letter-spacing:1px;margin-bottom:4px">⚡ UP NEXT</div>':''}
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+              <span style="font-weight:700;font-size:13px;flex:1;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${it.a}</span>
+              <span style="font-size:10px;color:var(--sub);font-weight:800">VS</span>
+              <span style="font-weight:700;font-size:13px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${it.b}</span>
+            </div>
+            <div style="font-size:10px;color:var(--sub);text-align:center;margin-top:4px;font-weight:600">${it.label}</div>
+          </div>
+        </div>
+      `).join('')}
+    </div>`;
+  }
+  document.getElementById('modal-upcoming').classList.add('active');
+}
+
 function renderNextMatch(t){
   const section=document.getElementById('next-match-section');
   if(!t.schedule&&!t.bracket){section.innerHTML='';return}
@@ -1474,6 +1579,7 @@ function renderNextMatch(t){
       <div class="nmc-team">${nextB}</div>
     </div>
     <div class="nmc-round">${roundLabel}</div>
+    <button class="btn btn-ghost" style="width:100%;margin-top:12px;font-size:12px;padding:9px" onclick="openUpcomingMatches()">📅 VIEW ALL UPCOMING MATCHES</button>
   </div>`;
 }
 
@@ -1640,7 +1746,8 @@ function renderBracket(t){
   
   const rNames=['Round 1','Round of 16','Quarter-Finals','Semi-Finals','The Final'];
   const getN=id=>{if(!id)return'TBD';const s=t.standings.find(x=>x.id===id);return s?.name||id};
-  
+  let foundNext=false;
+
   let html='';
   t.bracket.forEach((round,ri)=>{
     const name=rNames[Math.max(0,rNames.length-(t.bracket.length-ri))];
@@ -1650,7 +1757,10 @@ function renderBracket(t){
       
     round.forEach(m=>{
       const w=m.winner;
-      const cls=w?'b-match winner-match':'b-match';
+      const ready=!!(m.p1&&m.p2)&&!w;
+      const isNext=ready&&!foundNext;
+      if(isNext)foundNext=true;
+      const cls=w?'b-match winner-match':(isNext?'b-match next-match':'b-match');
       const n1=getN(m.p1);const n2=getN(m.p2||null);
       const isTbd1=!m.p1;const isTbd2=!m.p2;
       const legsPlayed=(m.legs||[]).length;
@@ -1660,6 +1770,7 @@ function renderBracket(t){
         : '';
       
       html+=`<div class="${cls}">
+        ${isNext?'<div style="font-size:8px;font-weight:800;color:var(--gold);letter-spacing:1px;text-align:center;margin-bottom:3px">⚡ NEXT UP</div>':''}
         <div class="b-player">
           <div style="display:flex;align-items:center;gap:8px;overflow:hidden">
             ${getMiniAv(m.p1, t, getDB())}
@@ -1681,11 +1792,28 @@ function renderBracket(t){
     html+='</div></div>';
     
     if(ri<t.bracket.length-1){
+      const anyDecided=round.some(m=>m.winner);
       html+=`<div class="bracket-connector">
         <svg width="100%" height="100%" style="position:absolute;inset:0" preserveAspectRatio="none">
-          <path d="M0,25 L17,25 L17,75 L35,75" stroke="rgba(255,255,255,0.12)" fill="none" stroke-width="2"/>
+          <path d="M0,25 L17,25 L17,75 L35,75" stroke="${anyDecided?'rgba(240,180,41,0.6)':'rgba(255,255,255,0.12)'}" fill="none" stroke-width="2" ${anyDecided?'style="filter:drop-shadow(0 0 3px rgba(240,180,41,0.5))"':''}/>
         </svg>
       </div>`;
+    } else {
+      // 🏆 Champion trophy card after the final round, once it's decided
+      const finalMatch=round[0];
+      if(finalMatch&&finalMatch.winner){
+        const champName=getN(finalMatch.winner);
+        html+=`<div class="bracket-round-wrap">
+          <div class="bracket-round-title">🏆</div>
+          <div class="bracket-round" style="justify-content:center">
+            <div style="background:linear-gradient(135deg,rgba(240,180,41,0.22),rgba(240,180,41,0.05));border:1px solid var(--gold);border-radius:14px;padding:16px 14px;width:150px;text-align:center;box-shadow:0 0 30px rgba(240,180,41,0.3)">
+              <div style="font-size:28px">🏆</div>
+              <div style="font-family:'Bebas Neue',sans-serif;font-size:16px;color:var(--gold);letter-spacing:1px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${champName}</div>
+              <div style="font-size:9px;color:var(--sub);margin-top:2px;letter-spacing:1px">CHAMPION</div>
+            </div>
+          </div>
+        </div>`;
+      }
     }
   });
   el.innerHTML=html;
@@ -1748,7 +1876,12 @@ function openRecord(){
     });
     poolStandings=t.standings.filter(s=>activeIds.has(s.id));
   } else {
-    poolStandings=t.standings.filter(s=>!s.suspended);
+    poolStandings=t.standings.filter(s=>{
+      if(s.suspended)return false;
+      const db=getDB();
+      const ids=s.proId?[s.proId,s.youthId]:[s.id];
+      return !ids.some(id=>db.players.find(p=>p.id===id)?.status==='banned');
+    });
   }
   const opts=poolStandings.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
   let scheduleHint='';
@@ -1780,6 +1913,11 @@ function openRecord(){
 }
 
 function buildMatchConsole() {
+    // 🐛 FIX: a pending walkover flag must not survive a selection change —
+    // otherwise switching to a different pair after applying a walkover
+    // could silently record their NORMAL match as a 3-0 walkover instead.
+    isCurrentMatchWalkover = false;
+
     const t = getTournament();
     const aId = document.getElementById('rec-a').value;
     const bId = document.getElementById('rec-b').value;
@@ -1820,7 +1958,18 @@ function buildMatchConsole() {
     };
 
     if(t.type === '1v1') {
+        const nemesis = getNemesisStatus(aId,bId,getDB());
+        const nemesisBanner = nemesis ? (()=>{
+            const db=getDB();
+            const rivalName = db.players.find(x=>x.id===nemesis.rivalId)?.name || '?';
+            const victimName = db.players.find(x=>x.id===nemesis.victimId)?.name || '?';
+            return `<div style="background:linear-gradient(135deg,rgba(255,71,87,0.15),rgba(168,85,247,0.1));border:1px solid var(--red);border-radius:10px;padding:10px 14px;margin-bottom:10px;text-align:center">
+                <div style="font-weight:800;color:var(--red);font-size:13px">⚔️ REVENGE MATCH!</div>
+                <div style="font-size:11px;color:var(--sub);margin-top:2px">${rivalName} has beaten ${victimName} 3 times in a row — this match doubles the ELO stakes!</div>
+            </div>`;
+        })() : '';
         consoleDiv.innerHTML = `
+            ${nemesisBanner}
             <div class="score-row">
               <div class="score-team" style="color:var(--sub)">${tA.name}</div>
               <div style="display:flex;align-items:center;gap:6px">
@@ -2062,12 +2211,41 @@ async function saveMatch(){
   };
   t.matches.push(matchRecord);
 
+  const rules = t.activeRules || [];
+  const hasRule = r => rules.includes(r);
+
   tA.PL++;tB.PL++;
   tA.GF+=goalsA;tA.GA+=goalsB;tB.GF+=goalsB;tB.GA+=goalsA;
   tA.GD=tA.GF-tA.GA;tB.GD=tB.GF-tB.GA;
-  if(goalsA>goalsB){tA.W++;tA.PTS+=3;tB.L++}
-  else if(goalsB>goalsA){tB.W++;tB.PTS+=3;tA.L++}
-  else{tA.D++;tA.PTS++;tB.D++;tB.PTS++}
+  if(goalsA>goalsB){
+      tA.W++;tB.L++;
+      let pts=3;
+      if(hasRule('clean_sheet')&&goalsB===0)pts=4; // 🧤 win to nil
+      tA.PTS+=pts;
+  }
+  else if(goalsB>goalsA){
+      tB.W++;tA.L++;
+      let pts=3;
+      if(hasRule('clean_sheet')&&goalsA===0)pts=4;
+      tB.PTS+=pts;
+  }
+  else{
+      const drawPts = hasRule('all_or_nothing') ? 0 : 1; // ⚔️ All or Nothing
+      tA.D++;tA.PTS+=drawPts;tB.D++;tB.PTS+=drawPts;
+  }
+
+  // 🗡️ Giant Slayer — a Youth-tier winner beating a Pro-tier loser (1v1 only)
+  if(hasRule('giant_slayer') && t.type==='1v1' && goalsA!==goalsB){
+      const winnerEntry = goalsA>goalsB ? tA : tB;
+      const loserEntry = goalsA>goalsB ? tB : tA;
+      const winnerPlayer = db.players.find(x=>x.id===winnerEntry.id);
+      const loserPlayer = db.players.find(x=>x.id===loserEntry.id);
+      if(winnerPlayer?.tier==='youth' && loserPlayer?.tier==='pro'){
+          winnerEntry.PTS += 1; // brings a normal 3 up to 4
+          loserEntry.PTS -= 1;
+          addNews(`🗡️ GIANT SLAYER: ${winnerPlayer.name} (Youth) shocked ${loserPlayer.name} (Pro)!`,'🗡️');
+      }
+  }
 
   if(t.schedule){
     const schedIdx=t.schedule.findIndex(m=>!m.played&&((m.aId===aId&&m.bId===bId)||(m.aId===bId&&m.bId===aId)));
@@ -2087,7 +2265,12 @@ async function saveMatch(){
       else if(isTeamB && goalsB < goalsA) matchResult = 'loss';
       matchResults[pid]=matchResult;
 
-      updatePlayerMarketValue(db, pid, { result: matchResult, goals: g, card: card }, isRewardTournament(t));
+      // 📉 Value Freeze skips market value entirely. ⚽ Goal Cap caps the
+      // goals counted toward the money/XP bonus (real goal count is untouched).
+      const gForRewards = hasRule('goal_cap') ? Math.min(g,5) : g;
+      if(!hasRule('value_freeze')){
+          updatePlayerMarketValue(db, pid, { result: matchResult, goals: gForRewards, card: card }, isRewardTournament(t), rules);
+      }
       const p = db.players.find(x => x.id === pid);
       if(p){
           p.stats.matchesPlayed=(p.stats.matchesPlayed||0)+1;
@@ -2095,7 +2278,7 @@ async function saveMatch(){
           else{ p.stats.winStreak=0; if(matchResult==='loss')p.stats.totalLosses=(p.stats.totalLosses||0)+1; }
       }
       if(g > 0 && card !== 'red') { 
-          if(p) { p.stats.goals = (p.stats.goals || 0) + g; awardXP(db, pid, g * 10); }
+          if(p) { p.stats.goals = (p.stats.goals || 0) + g; awardXP(db, pid, gForRewards * 10 * (hasRule('double_xp')?2:1)); }
       }
   });
 
@@ -2103,9 +2286,17 @@ async function saveMatch(){
   let teamB_Ids = t.type === '1v1' ? [bId] : [tB.proId, tB.youthId];
   let resultA = goalsA > goalsB ? 1 : (goalsA < goalsB ? 0 : 0.5);
   
-  updateELO(db, teamA_Ids, teamB_Ids, resultA);
-  teamA_Ids.forEach(id => awardXP(db, id, goalsA > goalsB ? 30 : (goalsA === goalsB ? 10 : 5)));
-  teamB_Ids.forEach(id => awardXP(db, id, goalsB > goalsA ? 30 : (goalsA === goalsB ? 10 : 5)));
+  if(!hasRule('value_freeze')){
+      const nemesis = t.type==='1v1' ? getNemesisStatus(aId,bId,db) : null;
+      updateELO(db, teamA_Ids, teamB_Ids, resultA, hasRule('elo_vampire') || !!nemesis);
+      if(nemesis){
+          const winnerId = goalsA>goalsB?aId:(goalsB>goalsA?bId:null);
+          if(winnerId===nemesis.victimId)addNews(`⚔️ REVENGE! ${db.players.find(x=>x.id===nemesis.victimId)?.name||'?'} finally beat their nemesis!`,'⚔️');
+      }
+  }
+  const xpMult = hasRule('double_xp') ? 2 : 1;
+  teamA_Ids.forEach(id => awardXP(db, id, (goalsA > goalsB ? 30 : (goalsA === goalsB ? 10 : 5)) * xpMult));
+  teamB_Ids.forEach(id => awardXP(db, id, (goalsB > goalsA ? 30 : (goalsA === goalsB ? 10 : 5)) * xpMult));
 
   Object.keys(matchEvents.cards).forEach(pid => {
       const cardType = matchEvents.cards[pid]; const p = db.players.find(x => x.id === pid);
@@ -2115,11 +2306,16 @@ async function saveMatch(){
           : t.standings.find(s => s.proId === pid || s.youthId === pid);
       if(cardType === 'yellow') {
           p.stats.yellow = (p.stats.yellow || 0) + 1;
-          if(entry){ entry.yellows = entry.yellows || {}; entry.yellows[pid] = (entry.yellows[pid] || 0) + 1; }
+          if(entry){
+              entry.yellows = entry.yellows || {}; entry.yellows[pid] = (entry.yellows[pid] || 0) + 1;
+              if(hasRule('no_mercy_var'))entry.PTS = (entry.PTS||0) - 1; // 🟥 No Mercy VAR
+          }
       }
       else if (cardType === 'red') {
-          p.stats.red = (p.stats.red || 0) + 1; p.stats.points = (p.stats.points || 0) - 1; 
+          p.stats.red = (p.stats.red || 0) + 1;
           if(entry) {
+              entry.PTS = (entry.PTS||0) - 1; // 🐛 FIX: was wrongly hitting the player's global career points instead of this tournament's standings
+              if(hasRule('no_mercy_var'))entry.PTS = (entry.PTS||0) - 2; // 🟥 No Mercy VAR: -3 total instead of -1
               entry.reds = entry.reds || {}; entry.reds[pid] = (entry.reds[pid] || 0) + 1;
               if(entry.reds[pid] > 3 && !entry.suspended) {
                   if(t.format === 'league') { entry.PTS -= 4; addNews(`🚨 PENALTY: ${p.name} exceeded 3 red cards. ${t.type==='2v2'?'Team loses':'Loses'} 4 Points!`,'🚨'); }
@@ -2139,7 +2335,19 @@ async function saveMatch(){
   addNews(headline, '📰');
   checkAchievements(db, matchEvents, matchResults);
   
-  // 🛡️ حزام الأمان (Try/Catch) لمنع تجمد الزر
+  await attemptMatchPersist(t, aId, bId, tA, tB, goalsA, goalsB);
+}
+
+// 🐛 FIX (Double-Save Data Corruption): all stat mutations above already
+// happened in memory. This step ONLY persists them — if it fails, retrying
+// calls this exact function again with the SAME already-computed values,
+// instead of re-running saveMatch() from scratch (which would double-count
+// PTS/goals/XP on every failed-then-retried attempt).
+async function attemptMatchPersist(t, aId, bId, tA, tB, goalsA, goalsB){
+  const btn = document.querySelector('#modal-record .btn-green');
+  if(btn) { btn.innerHTML = '⏳ SAVING...'; btn.style.pointerEvents = 'none'; }
+  const db = getDB();
+
   try {
       await saveSingleTournament(t);
       if(t.type === '1v1') {
@@ -2150,6 +2358,10 @@ async function saveMatch(){
       }
       localStorage.setItem(DB_KEY, JSON.stringify(db));
 
+      const involvedPids = t.type==='1v1' ? [aId,bId] : [tA.proId,tA.youthId,tB.proId,tB.youthId].filter(Boolean);
+      await updateDailyQuestProgress(db, involvedPids);
+      localStorage.setItem(DB_KEY, JSON.stringify(db));
+
       if(t.phase==='groups'&&t.autoQualify&&t.schedule&&t.schedule.length>0&&t.schedule.every(m=>m.played)){
           await qualifyGroupsToKnockout(db,t);
       }
@@ -2158,13 +2370,175 @@ async function saveMatch(){
       renderTournamentScreen();
       showGoalAnimation(`${goalsA} – ${goalsB}`);
       snack(`⚽ ${tA.name} ${goalsA}–${goalsB} ${tB.name}`);
+      if(btn){ btn.innerHTML = '✅ SAVE RESULT'; btn.style.pointerEvents = 'auto'; btn.onclick = saveMatch; }
   } catch(err) {
       console.error(err);
-      showErr('rec-err', '❌ Network Error. Match not saved.');
-  } finally {
-      // 🔓 فك تجميد الزر دائماً مهما حدث
-      if(btn) { btn.innerHTML = '✅ SAVE RESULT'; btn.style.pointerEvents = 'auto'; }
+      showErr('rec-err', '⚠️ Network error — this result is saved locally but NOT synced yet. Tap "RETRY SAVE" (do not re-fill the form).');
+      if(btn){
+          btn.innerHTML = '🔄 RETRY SAVE';
+          btn.style.pointerEvents = 'auto';
+          btn.onclick = () => attemptMatchPersist(t, aId, bId, tA, tB, goalsA, goalsB);
+      }
   }
+}
+
+// ============================================================
+// DAILY QUESTS — 3 shared quests regenerate every day, tracked per
+// player. Completing one gives a one-time +50 XP bonus that day.
+// ============================================================
+function todayStr(){ return new Date().toISOString().slice(0,10); }
+
+const QUEST_POOL = [
+  {id:'hattrick', icon:'🎩', label:'Score a hat-trick (3+ goals) in one match'},
+  {id:'clean_sheet', icon:'🧤', label:'Win a match without conceding a goal'},
+  {id:'win_twice', icon:'🔥', label:'Win 2 matches today'},
+  {id:'motm', icon:'⭐', label:'Get voted Man of the Match'},
+  {id:'score_5', icon:'⚽', label:'Score 5+ goals total today'},
+  {id:'no_card_win', icon:'🟢', label:'Win a match without picking up any card'},
+  {id:'score_every_match', icon:'🎯', label:'Score in every match you play today (min. 2 matches)'},
+  {id:'draw_match', icon:'🤝', label:'Play out a draw today'},
+  {id:'underdog_win', icon:'🐉', label:'Beat an opponent with a higher ELO rating'},
+  {id:'perfect_day', icon:'💯', label:'Win every match you play today (min. 2 matches)'},
+];
+
+async function getTodaysQuests(){
+  const db=getDB();
+  const today=todayStr();
+  if(db.dailyQuests && db.dailyQuests.date===today) return db.dailyQuests.quests;
+
+  const shuffled=[...QUEST_POOL].sort(()=>Math.random()-0.5).slice(0,3);
+  db.dailyQuests={date:today, quests:shuffled};
+  try{
+    await supabaseClient.from('admin_settings').upsert({key:'dailyQuests', value:db.dailyQuests});
+  }catch(e){ console.error('Failed to persist daily quests', e); }
+  return shuffled;
+}
+
+// Collects every match this player was involved in, played TODAY,
+// tagged with which side ('A'/'B') they were on for that match.
+function getTodaysMatchesForPlayer(pid, db){
+  const results=[];
+  const today=todayStr();
+  db.tournaments.forEach(t=>{
+    (t.matches||[]).forEach(m=>{
+      if(m.isWalkover)return;
+      if(new Date(m.ts||0).toISOString().slice(0,10)!==today)return;
+      let side=null, oppIds=[];
+      if(t.type==='1v1'){
+        if(m.aId===pid){side='A';oppIds=[m.bId];}
+        else if(m.bId===pid){side='B';oppIds=[m.aId];}
+      } else {
+        const tA=t.standings.find(s=>s.id===m.aId), tB=t.standings.find(s=>s.id===m.bId);
+        if(tA&&(tA.proId===pid||tA.youthId===pid)){side='A';oppIds=tB?[tB.proId,tB.youthId].filter(Boolean):[];}
+        else if(tB&&(tB.proId===pid||tB.youthId===pid)){side='B';oppIds=tA?[tA.proId,tA.youthId].filter(Boolean):[];}
+      }
+      if(side)results.push({...m,side,oppIds});
+    });
+  });
+  return results;
+}
+
+function checkQuestCompletion(pid, questId, todayMatches){
+  switch(questId){
+    case 'hattrick':
+      return todayMatches.some(m=>(m.events?.goals?.[pid]||0)>=3);
+    case 'clean_sheet':
+      return todayMatches.some(m=>m.side==='A' ? (m.goalsA>m.goalsB&&m.goalsB===0) : (m.goalsB>m.goalsA&&m.goalsA===0));
+    case 'win_twice':{
+      let wins=0;
+      todayMatches.forEach(m=>{ if(m.side==='A'&&m.goalsA>m.goalsB)wins++; else if(m.side==='B'&&m.goalsB>m.goalsA)wins++; });
+      return wins>=2;
+    }
+    case 'motm':
+      return todayMatches.some(m=>m.motmId===pid);
+    case 'score_5':
+      return todayMatches.reduce((s,m)=>s+(m.events?.goals?.[pid]||0),0)>=5;
+    case 'no_card_win':
+      return todayMatches.some(m=>{
+        const won = m.side==='A' ? m.goalsA>m.goalsB : m.goalsB>m.goalsA;
+        return won && !(m.events?.cards?.[pid]);
+      });
+    case 'score_every_match':
+      return todayMatches.length>=2 && todayMatches.every(m=>(m.events?.goals?.[pid]||0)>0);
+    case 'draw_match':
+      return todayMatches.some(m=>m.goalsA===m.goalsB);
+    case 'underdog_win':{
+      const db=getDB();
+      const myElo=db.players.find(x=>x.id===pid)?.stats?.elo||1000;
+      return todayMatches.some(m=>{
+        const won = m.side==='A' ? m.goalsA>m.goalsB : m.goalsB>m.goalsA;
+        if(!won||!m.oppIds?.length)return false;
+        const oppElos=m.oppIds.map(id=>db.players.find(x=>x.id===id)?.stats?.elo||1000);
+        const avgOppElo=oppElos.reduce((s,e)=>s+e,0)/oppElos.length;
+        return avgOppElo>myElo;
+      });
+    }
+    case 'perfect_day':
+      return todayMatches.length>=2 && todayMatches.every(m=> m.side==='A' ? m.goalsA>m.goalsB : m.goalsB>m.goalsA);
+    default:
+      return false;
+  }
+}
+
+// Called after a match is saved — checks the involved players against
+// today's 3 quests and awards the one-time XP bonus for any newly done.
+async function updateDailyQuestProgress(db, pids){
+  const quests=await getTodaysQuests();
+  const today=todayStr();
+  for(const pid of pids){
+    const p=db.players.find(x=>x.id===pid);
+    if(!p)continue;
+    p.stats=p.stats||defaultStats();
+    if(!p.stats.dailyQuestDate || p.stats.dailyQuestDate!==today){
+      p.stats.dailyQuestDate=today;
+      p.stats.dailyQuestCompleted=[];
+    }
+    const todayMatches=getTodaysMatchesForPlayer(pid, db);
+    let changed=false;
+    quests.forEach(q=>{
+      if(p.stats.dailyQuestCompleted.includes(q.id))return;
+      if(checkQuestCompletion(pid, q.id, todayMatches)){
+        p.stats.dailyQuestCompleted.push(q.id);
+        awardXP(db, pid, 50);
+        markNewAchievement(p);
+        snack(`🎯 Daily Quest complete: ${q.label} (+50 XP)`);
+        changed=true;
+      }
+    });
+    if(changed)await saveSinglePlayer(p);
+  }
+}
+
+// ============================================================
+// NEMESIS SYSTEM — if one player has beaten another 3 times in a
+// row (1v1 only, most recent matches first), their next meeting is
+// flagged as a Revenge Match with doubled ELO stakes.
+// ============================================================
+function getNemesisStatus(pid1,pid2,db){
+  const matches=[];
+  db.tournaments.forEach(t=>{
+    if(t.type!=='1v1')return;
+    (t.matches||[]).forEach(m=>{
+      if(m.isWalkover)return;
+      if((m.aId===pid1&&m.bId===pid2)||(m.aId===pid2&&m.bId===pid1)){
+        matches.push(m);
+      }
+    });
+  });
+  matches.sort((a,b)=>(b.ts||0)-(a.ts||0)); // most recent first
+  if(matches.length<3)return null;
+  const last3=matches.slice(0,3);
+  let rivalId=null;
+  for(const m of last3){
+    let winnerId=null;
+    if(m.goalsA>m.goalsB)winnerId=m.aId;
+    else if(m.goalsB>m.goalsA)winnerId=m.bId;
+    if(!winnerId)return null; // a draw breaks the streak
+    if(rivalId===null)rivalId=winnerId;
+    else if(rivalId!==winnerId)return null; // streak broken
+  }
+  const victimId = rivalId===pid1 ? pid2 : pid1;
+  return {rivalId,victimId,streak:3};
 }
 
 function findBracketMatch(t,aId,bId){
@@ -2216,7 +2590,8 @@ function defaultStats(){
     xp:0, points:0, trophies:0, goals:0, yellow:0, red:0,
     goldenBoots:0, tournamentMVPs:0, badges:[],
     matchesPlayed:0, winStreak:0, totalLosses:0,
-    lastAchievementTs:0, lastSeenAchievementTs:0
+    lastAchievementTs:0, lastSeenAchievementTs:0,
+    dailyQuestDate:null, dailyQuestCompleted:[]
   };
 }
 function awardXP(db,pid,xp){
@@ -2648,13 +3023,14 @@ async function deleteTournament(){
 // tournament a player has ever played — it is NOT reversible in
 // isolation, so ELO is intentionally left untouched here.)
 // ============================================================
-function reversePlayerMarketValue(db,pid,matchData){
+function reversePlayerMarketValue(db,pid,matchData,rules=[]){
   const p=db.players.find(x=>x.id===pid);if(!p)return;
+  const goldenMarket = rules.includes('golden_market');
   let val=p.marketValue||500000;
   if(matchData.result==='win')val-=100000;
   else if(matchData.result==='draw')val-=25000;
-  else if(matchData.result==='loss')val+=50000;
-  if(matchData.goals>0)val-=(matchData.goals*50000);
+  else if(matchData.result==='loss')val+=(goldenMarket?300000:50000); // 💰 Golden Market
+  if(matchData.goals>0)val-=(matchData.goals*(goldenMarket?200000:50000)); // 💰 Golden Market
   if(matchData.card==='yellow')val+=50000;
   else if(matchData.card==='red')val+=150000;
   if(val<100000)val=100000; // safety floor — same as the forward engine
@@ -2667,9 +3043,13 @@ function revertMatchEffects(db,t,m){
   const tB=t.standings.find(s=>s.id===m.bId);
   const goalsA=m.goalsA, goalsB=m.goalsB;
   const rewardTournament=isRewardTournament(t);
+  const rules = t.activeRules || [];
+  const hasRule = r => rules.includes(r);
+  const xpMult = hasRule('double_xp') ? 2 : 1;
 
   Object.keys(events.goals||{}).forEach(pid=>{
     const g=events.goals[pid];
+    const gForRewards = hasRule('goal_cap') ? Math.min(g,5) : g; // ⚽ Goal Cap — mirror the forward cap
     const card=(events.cards||{})[pid];
     const isTeamA=t.type==='1v1'?pid===m.aId:(tA&&(pid===tA.proId||pid===tA.youthId));
     const isTeamB=t.type==='1v1'?pid===m.bId:(tB&&(pid===tB.proId||pid===tB.youthId));
@@ -2677,7 +3057,11 @@ function revertMatchEffects(db,t,m){
     if(isTeamA&&goalsA>goalsB)matchResult='win';else if(isTeamA&&goalsA<goalsB)matchResult='loss';
     else if(isTeamB&&goalsB>goalsA)matchResult='win';else if(isTeamB&&goalsB<goalsA)matchResult='loss';
 
-    if(rewardTournament)reversePlayerMarketValue(db,pid,{result:matchResult,goals:g,card:card});
+    // 📉 Value Freeze — market value was never touched going forward, so it
+    // must never be touched on reversal either.
+    if(rewardTournament && !hasRule('value_freeze')){
+      reversePlayerMarketValue(db,pid,{result:matchResult,goals:gForRewards,card:card},rules);
+    }
     const p=db.players.find(x=>x.id===pid);
     if(p){
       p.stats.matchesPlayed=Math.max(0,(p.stats.matchesPlayed||0)-1);
@@ -2686,14 +3070,14 @@ function revertMatchEffects(db,t,m){
       // it's intentionally left alone here since it can't be cleanly un-wound.
     }
     if(g>0&&card!=='red'){
-      if(p){p.stats.goals=Math.max(0,(p.stats.goals||0)-g);awardXP(db,pid,-(g*10));}
+      if(p){p.stats.goals=Math.max(0,(p.stats.goals||0)-g);awardXP(db,pid,-(gForRewards*10*xpMult));} // 🌟 Double XP
     }
   });
 
   const teamA_Ids=t.type==='1v1'?[m.aId]:(tA?[tA.proId,tA.youthId]:[]);
   const teamB_Ids=t.type==='1v1'?[m.bId]:(tB?[tB.proId,tB.youthId]:[]);
-  teamA_Ids.forEach(id=>awardXP(db,id,-(goalsA>goalsB?30:(goalsA===goalsB?10:5))));
-  teamB_Ids.forEach(id=>awardXP(db,id,-(goalsB>goalsA?30:(goalsA===goalsB?10:5))));
+  teamA_Ids.forEach(id=>awardXP(db,id,-((goalsA>goalsB?30:(goalsA===goalsB?10:5))*xpMult))); // 🌟 Double XP
+  teamB_Ids.forEach(id=>awardXP(db,id,-((goalsB>goalsA?30:(goalsA===goalsB?10:5))*xpMult))); // 🌟 Double XP
 
   Object.keys(events.cards||{}).forEach(pid=>{
     const cardType=events.cards[pid];
@@ -2764,15 +3148,43 @@ async function editLastMatch(){
   revertMatchEffects(db,t,m);
 
   // 2. Reverse this match's effect on the tournament standings
+  const rules = t.activeRules || [];
+  const hasRule = r => rules.includes(r);
   const tA=t.standings.find(s=>s.id===m.aId);
   const tB=t.standings.find(s=>s.id===m.bId);
   if(tA&&tB){
     tA.PL--;tB.PL--;
     tA.GF-=m.goalsA;tA.GA-=m.goalsB;tB.GF-=m.goalsB;tB.GA-=m.goalsA;
     tA.GD=tA.GF-tA.GA;tB.GD=tB.GF-tB.GA;
-    if(m.goalsA>m.goalsB){tA.W--;tA.PTS-=3;tB.L--;}
-    else if(m.goalsB>m.goalsA){tB.W--;tB.PTS-=3;tA.L--;}
-    else{tA.D--;tA.PTS--;tB.D--;tB.PTS--;}
+
+    if(m.goalsA>m.goalsB){
+      tA.W--;tB.L--;
+      let pts=3;
+      if(hasRule('clean_sheet')&&m.goalsB===0)pts=4; // 🧤 must match the forward bonus exactly
+      tA.PTS-=pts;
+    }
+    else if(m.goalsB>m.goalsA){
+      tB.W--;tA.L--;
+      let pts=3;
+      if(hasRule('clean_sheet')&&m.goalsA===0)pts=4;
+      tB.PTS-=pts;
+    }
+    else{
+      const drawPts = hasRule('all_or_nothing') ? 0 : 1; // ⚔️ must match the forward draw value
+      tA.D--;tA.PTS-=drawPts;tB.D--;tB.PTS-=drawPts;
+    }
+
+    // 🗡️ Giant Slayer — undo the extra +1/-1 if it applied to this match
+    if(hasRule('giant_slayer') && t.type==='1v1' && m.goalsA!==m.goalsB){
+      const winnerEntry = m.goalsA>m.goalsB ? tA : tB;
+      const loserEntry = m.goalsA>m.goalsB ? tB : tA;
+      const winnerPlayer = db.players.find(x=>x.id===winnerEntry.id);
+      const loserPlayer = db.players.find(x=>x.id===loserEntry.id);
+      if(winnerPlayer?.tier==='youth' && loserPlayer?.tier==='pro'){
+        winnerEntry.PTS -= 1;
+        loserEntry.PTS += 1;
+      }
+    }
 
     Object.keys((m.events&&m.events.cards)||{}).forEach(pid=>{
       const cardType=m.events.cards[pid];
@@ -2780,9 +3192,12 @@ async function editLastMatch(){
       if(!entry)return;
       if(cardType==='yellow'&&entry.yellows&&entry.yellows[pid]){
         entry.yellows[pid]=Math.max(0,entry.yellows[pid]-1);
+        if(hasRule('no_mercy_var'))entry.PTS+=1; // 🟥 undo the No Mercy VAR yellow penalty
       } else if(cardType==='red'&&entry.reds&&entry.reds[pid]){
         const wasOverLimit=entry.reds[pid]>3;
         entry.reds[pid]--;
+        entry.PTS+=1; // undo the base per-card -1 penalty
+        if(hasRule('no_mercy_var'))entry.PTS+=2; // 🟥 undo the extra No Mercy VAR red penalty (-3 total)
         if(wasOverLimit&&t.format==='league')entry.PTS+=4;
         if(wasOverLimit&&entry.reds[pid]<=3)entry.suspended=false;
       }
@@ -2882,11 +3297,27 @@ function renderLocker(){
           const hasNewAchievement = (me.stats?.lastAchievementTs||0) > (me.stats?.lastSeenAchievementTs||0);
           const newBadgeHtml = hasNewAchievement ? `<span style="background:var(--red);color:#fff;font-size:9px;font-weight:800;padding:2px 8px;border-radius:10px;margin-left:8px;animation:pulseNews 2s infinite">🎉 NEW!</span>` : '';
           html += `<div class="sec-hdr"><div class="sec-ttl" style="color:var(--gold)">🌟 My Dashboard${newBadgeHtml}</div></div>`;
-          html += `<div class="player-list" style="margin-bottom:18px">${createCard(me, myIdx, true)}</div>`;
+          html += `<div class="player-list" style="margin-bottom:10px">${createCard(me, myIdx, true)}</div>`;
           if(hasNewAchievement){
               me.stats.lastSeenAchievementTs = Date.now();
               saveSinglePlayer(me);
               localStorage.setItem(DB_KEY, JSON.stringify(db));
+          }
+
+          const todaysQuests = db.dailyQuests?.date===todayStr() ? db.dailyQuests.quests : [];
+          if(todaysQuests.length>0){
+              const completed = (me.stats?.dailyQuestDate===todayStr()) ? (me.stats.dailyQuestCompleted||[]) : [];
+              html += `<div class="settings-card" style="margin-bottom:18px">
+                <div class="settings-title" style="font-size:11px">🎯 Today's Quests</div>
+                ${todaysQuests.map(q=>{
+                  const done = completed.includes(q.id);
+                  return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:13px;${done?'opacity:0.5':''}">
+                    <span>${done?'✅':q.icon}</span>
+                    <span style="text-decoration:${done?'line-through':'none'}">${q.label}</span>
+                    <span style="margin-left:auto;font-size:11px;color:var(--gold);font-weight:700">+50 XP</span>
+                  </div>`;
+                }).join('')}
+              </div>`;
           }
       }
   }
@@ -4232,13 +4663,16 @@ async function refreshData() {
     showSkeletonForActiveTab();
     snack('🔄 Syncing live data...'); 
     try {
-        const [pRes, tRes, nRes, pendRes, admRes] = await Promise.all([
+        const [pRes, tRes, nRes, pendRes, admRes, questRes] = await Promise.all([
             supabaseClient.from('players').select('*'),
             supabaseClient.from('tournaments').select('*'), 
             supabaseClient.from('news').select('*').order('ts', { ascending: false }).limit(20),
             supabaseClient.from('pending_requests').select('*'),
-            supabaseClient.from('admin_settings').select('value').eq('key', 'codes').single()
+            supabaseClient.from('admin_settings').select('value').eq('key', 'codes').single(),
+            supabaseClient.from('admin_settings').select('value').eq('key', 'dailyQuests').single()
         ]);
+
+        if(questRes?.data?.value) cloudDB.dailyQuests = questRes.data.value;
 
         if(pRes.error) console.error("Players Fetch Error:", pRes.error);
         if(tRes.error) console.error("Tournaments Fetch Error:", tRes.error);
@@ -4266,6 +4700,7 @@ async function refreshData() {
                 autoQualify: t.auto_qualify || false,
                 archivedAt: t.archived_at || null,
                 endedAt: t.ended_at || null,
+                activeRules: t.active_rules || [],
                 category: t.category || 'official',
                 banner: t.banner || '', logo: t.logo || '', themeColor: t.theme_color || '#f0b429'
             })).sort((a,b) => b.id - a.id); 
@@ -4325,7 +4760,7 @@ async function adminClearSuspension(idx) {
 // ============================================================
 // ENGINE 2: ELO GLOBAL RATING ALGORITHM
 // ============================================================
-function updateELO(db, teamA_Ids, teamB_Ids, resultA) {
+function updateELO(db, teamA_Ids, teamB_Ids, resultA, eloVampire=false) {
     // resultA: 1 (Win), 0 (Loss), 0.5 (Draw)
     const teamA = teamA_Ids.map(id => db.players.find(x => x.id === id)).filter(Boolean);
     const teamB = teamB_Ids.map(id => db.players.find(x => x.id === id)).filter(Boolean);
@@ -4341,7 +4776,13 @@ function updateELO(db, teamA_Ids, teamB_Ids, resultA) {
     // 3. The Math Magic: Calculate expected chances of winning
     const expectedA = 1 / (1 + Math.pow(10, (avgEloB - avgEloA) / 400));
     const expectedB = 1 / (1 + Math.pow(10, (avgEloA - avgEloB) / 400));
-    const K = 40; // High stakes: Maximum points you can steal in one match
+    let K = 40; // High stakes: Maximum points you can steal in one match
+
+    // 🧛 ELO Vampire: the underdog winning steals DOUBLE the ELO points
+    if(eloVampire){
+        const underdogWon = (resultA===1 && avgEloA<avgEloB) || (resultA===0 && avgEloB<avgEloA);
+        if(underdogWon) K = 80;
+    }
 
     // 4. Update Team A
     teamA.forEach(p => {
@@ -4368,10 +4809,11 @@ function recordMarketValueHistory(p){
     if(p.marketValueHistory.length>60)p.marketValueHistory=p.marketValueHistory.slice(-60);
 }
 
-function updatePlayerMarketValue(db, pid, matchData, applyReward=true) {
+function updatePlayerMarketValue(db, pid, matchData, applyReward=true, rules=[]) {
     const p = db.players.find(x => x.id === pid);
     if(!p) return;
     if(!applyReward) return; // Qualifier/Friendly tournaments: no market-value reward
+    const goldenMarket = rules.includes('golden_market');
     
     let val = p.marketValue || 500000; // Default starting price is 500k
     p.previousMarketValue = val;
@@ -4379,10 +4821,10 @@ function updatePlayerMarketValue(db, pid, matchData, applyReward=true) {
     // 1. Match Result Impact
     if(matchData.result === 'win') val += 100000;
     else if(matchData.result === 'draw') val += 25000;
-    else if(matchData.result === 'loss') val -= 50000;
+    else if(matchData.result === 'loss') val -= (goldenMarket ? 300000 : 50000); // 💰 Golden Market
     
-    // 2. Goals Impact (+50k per goal)
-    if(matchData.goals > 0) val += (matchData.goals * 50000);
+    // 2. Goals Impact
+    if(matchData.goals > 0) val += (matchData.goals * (goldenMarket ? 200000 : 50000)); // 💰 Golden Market
     
     // 3. Cards Penalty
     if(matchData.card === 'yellow') val -= 50000;

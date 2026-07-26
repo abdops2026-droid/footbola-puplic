@@ -258,6 +258,30 @@
         </div>
       </div>
 
+      <div class="rule-card pc">
+        <div class="rule-icon">🎲</div>
+        <div class="rule-title">Challenge Mode — قواعد اختيارية</div>
+        <div class="rule-txt">
+          When creating a cup, the Admin can switch to <strong>Challenge Mode</strong> and stack any combination of custom rules: Clean Sheet Bonus, Giant Slayer, Value Freeze, Goal Cap, No Mercy VAR, All or Nothing, ELO Vampire, Double XP, and Golden Market. Active rules are shown as chips at the top of that tournament's screen.
+        </div>
+      </div>
+
+      <div class="rule-card rc">
+        <div class="rule-icon">⚔️</div>
+        <div class="rule-title">Nemesis System — الغريم الدائم</div>
+        <div class="rule-txt">
+          If one player beats another <strong>3 times in a row</strong> (1v1 only), their next meeting is automatically flagged as a <strong style="color:var(--red)">Revenge Match</strong> — doubling the ELO stakes for that game, win or lose.
+        </div>
+      </div>
+
+      <div class="rule-card gc">
+        <div class="rule-icon">🎯</div>
+        <div class="rule-title">Daily Quests — المهام اليومية</div>
+        <div class="rule-txt">
+          Every day, 3 quests are drawn at random (hat-trick, clean sheet, win twice, get MOTM, score 5+ goals). Completing one gives a one-time <strong style="color:var(--gold)">+50 XP</strong> bonus for that day. Check your progress under "My Dashboard" in the Locker.
+        </div>
+      </div>
+
       <div class="rule-card gc">
         <div class="rule-icon">⭐</div>
         <div class="rule-title">XP & Leveling System — نقاط الخبرة</div>
@@ -302,6 +326,7 @@
     <div class="back-btn" onclick="backToApp()">‹ Back to Arena</div>
     <div class="t-scr-name" id="t-scr-name"></div>
     <div class="t-scr-meta" id="t-scr-meta"></div>
+    <div id="t-scr-rules" style="display:none;gap:5px;flex-wrap:wrap;margin-top:6px"></div>
   </div>
   <div class="t-scr-body">
     <div id="next-match-section"></div>
@@ -391,6 +416,24 @@
       </div>
       <div style="font-size:11px;color:var(--sub);margin-top:6px">1v1 = each player competes solo. 2v2 = pair a ⭐PRO with a 🌱YOUTH to form a team.</div>
     </div>
+    <div class="field"><label>Game Mode</label>
+      <div class="format-row" id="gamemode-row">
+        <div class="f-opt sel" data-val="classic" onclick="setGameMode('classic',this)">⚖️ Classic</div>
+        <div class="f-opt" data-val="challenge" onclick="setGameMode('challenge',this)">🎲 Challenge Mode</div>
+      </div>
+      <div id="challenge-rules-box" style="display:none;margin-top:10px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px">
+        <div style="font-size:11px;color:var(--sub);margin-bottom:8px">Mix and match any rules — they stack together for a totally custom cup.</div>
+        <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;padding:6px 0;border-bottom:1px solid var(--border)"><input type="checkbox" data-rule="clean_sheet" style="margin-top:3px"> <span>🧤 <strong>Clean Sheet Bonus</strong> — win without conceding = 4 points instead of 3</span></label>
+        <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;padding:6px 0;border-bottom:1px solid var(--border)"><input type="checkbox" data-rule="giant_slayer" style="margin-top:3px"> <span>🗡️ <strong>Giant Slayer</strong> — a 🌱Youth beating a ⭐Pro gets 4 points; the Pro loses 1 point</span></label>
+        <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;padding:6px 0;border-bottom:1px solid var(--border)"><input type="checkbox" data-rule="value_freeze" style="margin-top:3px"> <span>📉 <strong>Value Freeze</strong> — Market Value & Global ELO don't change, only the tournament table does</span></label>
+        <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;padding:6px 0;border-bottom:1px solid var(--border)"><input type="checkbox" data-rule="goal_cap" style="margin-top:3px"> <span>⚽ <strong>Goal Cap</strong> — score as many as you want, but Money/XP only count for the first 5 goals</span></label>
+        <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;padding:6px 0;border-bottom:1px solid var(--border)"><input type="checkbox" data-rule="no_mercy_var" style="margin-top:3px"> <span>🟥 <strong>No Mercy VAR</strong> — Yellow card = -1 tournament point, Red card = -3 tournament points</span></label>
+        <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;padding:6px 0;border-bottom:1px solid var(--border)"><input type="checkbox" data-rule="all_or_nothing" style="margin-top:3px"> <span>⚔️ <strong>All or Nothing</strong> — a draw gives 0 points to both sides instead of 1</span></label>
+        <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;padding:6px 0;border-bottom:1px solid var(--border)"><input type="checkbox" data-rule="elo_vampire" style="margin-top:3px"> <span>🧛 <strong>ELO Vampire</strong> — a lower-ELO player beating a higher-ELO one steals double the ELO points</span></label>
+        <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;padding:6px 0;border-bottom:1px solid var(--border)"><input type="checkbox" data-rule="double_xp" style="margin-top:3px"> <span>🌟 <strong>Double XP Event</strong> — every goal, win, and MOTM award gives double XP</span></label>
+        <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;padding:6px 0"><input type="checkbox" data-rule="golden_market" style="margin-top:3px"> <span>💰 <strong>Golden Market</strong> — goals give €200K each (instead of €50K), but a loss costs €300K (instead of €50K)</span></label>
+      </div>
+    </div>
     <div id="create-players-section"></div>
     <div id="group-config-section"></div>
     <div id="create-err" class="err-msg" style="margin-top:0;margin-bottom:10px"></div>
@@ -452,6 +495,15 @@
     <div class="modal-handle"></div>
     <div class="modal-title">⚔️ Head-to-Head</div>
     <div id="h2h-body"></div>
+  </div>
+</div>
+
+<!-- MODAL: UPCOMING MATCHES -->
+<div id="modal-upcoming" class="modal-ov" onclick="if(event.target===this)closeModal('modal-upcoming')">
+  <div class="modal" style="max-height:85vh">
+    <div class="modal-handle"></div>
+    <div class="modal-title">📅 Upcoming Matches</div>
+    <div id="upcoming-body" style="max-height:65vh;overflow-y:auto"></div>
   </div>
 </div>
 

@@ -366,6 +366,15 @@ body{display:flex;justify-content:center;align-items:stretch;font-family:'Rajdha
   background: linear-gradient(135deg, rgba(240,180,41,0.12), rgba(17, 17, 37, 0.95));
   box-shadow: 0 0 25px rgba(240,180,41,0.25);
 }
+.b-match.next-match {
+  border-color: rgba(77,171,247,0.6);
+  animation: bracketPulse 2s infinite;
+}
+@keyframes bracketPulse {
+  0% { box-shadow: 0 0 8px rgba(77,171,247,0.15); }
+  50% { box-shadow: 0 0 22px rgba(77,171,247,0.45); }
+  100% { box-shadow: 0 0 8px rgba(77,171,247,0.15); }
+}
 .b-player {
   padding: 6px 0;
   display: flex;
