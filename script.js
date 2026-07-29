@@ -1472,11 +1472,12 @@ async function qualifyToKnockout(){
 
   const qNum=parseInt(prompt('How many players qualify to the Knockout Tree?\nEnter 2, 4, 8, or 16:'));
   if(![2,4,8,16].includes(qNum)){snack('⚠️ Enter 2, 4, 8, or 16');return}
-  if(qNum>=t.participants.length){snack('⚠️ Number must be less than total players');return}
+  const eligible=t.standings.filter(s=>!s.suspended);
+  if(qNum>=eligible.length){snack('⚠️ Number must be less than the number of eligible (non-disqualified) players');return}
 
   if(!confirm(`Qualify Top ${qNum} players to the Knockout Tree?`))return;
 
-  const sorted=sortedStandings(t);
+  const sorted=[...eligible].sort((a,b)=>compareStandings(t,a,b));
   const topPlayers=sorted.slice(0,qNum).map(s=>s.id);
 
   t.phase='elimination';
@@ -1497,10 +1498,14 @@ async function qualifyGroupsToKnockout(db,t){
 
   let qualifiedIds=[];
   let previewLines=[];
+  let excludedNote='';
   t.groups.forEach((g,gi)=>{
-    const groupStandings=t.standings.filter(s=>s.group===gi).sort((a,b)=>compareStandings(t,a,b));
+    const allInGroup=t.standings.filter(s=>s.group===gi);
+    const eligible=allInGroup.filter(s=>!s.suspended).sort((a,b)=>compareStandings(t,a,b));
+    const disqualified=allInGroup.filter(s=>s.suspended);
+    if(disqualified.length>0)excludedNote+=`\n⛔ Excluded (disqualified): ${disqualified.map(s=>s.name).join(', ')}`;
     const n=g.qualifiers||2;
-    const picks=groupStandings.slice(0,n);
+    const picks=eligible.slice(0,n);
     qualifiedIds.push(...picks.map(s=>s.id));
     previewLines.push(`${g.name}: ${picks.map(s=>s.name).join(', ')}`);
   });
@@ -1513,7 +1518,7 @@ async function qualifyGroupsToKnockout(db,t){
   const headerMsg = unplayed>0
     ? `⚠️ ${unplayed} group-stage match(es) are still unplayed.\n\n`
     : `🎉 All group matches are complete!\n\n`;
-  const confirmMsg = `${headerMsg}Qualifiers for the Knockout Tree:\n${previewLines.join('\n')}\n\nGenerate the tree now?`;
+  const confirmMsg = `${headerMsg}Qualifiers for the Knockout Tree:\n${previewLines.join('\n')}${excludedNote}\n\nGenerate the tree now?`;
   if(!confirm(confirmMsg))return;
 
   t.phase='elimination';
@@ -1695,15 +1700,19 @@ function renderGroupsStandings(t,content){
   t.groups.forEach((g,gi)=>{
     const sorted=t.standings.filter(s=>s.group===gi).sort((a,b)=>compareStandings(t,a,b));
     const qual=g.qualifiers||2;
+    let eligibleRank=0; // rank counter that skips disqualified entries
     html+=`<div style="margin-bottom:20px">
       <div style="font-weight:800;color:var(--gold);font-size:14px;margin-bottom:8px">${g.name} <span style="color:var(--sub);font-weight:600;font-size:11px">— Top ${qual} qualify</span></div>
       <table class="standings-table">
         <thead><tr><th>#</th><th style="text-align:left">Club / Player</th><th>PL</th><th>GD</th><th>PTS</th></tr></thead>
         <tbody>${sorted.map((p,i)=>{
-          const rowClass=i<qual?'row-blue':'';
-          return`<tr class="${rowClass}" onclick="openProfileByName('${encodeURIComponent(p.name)}')">
+          const willQualify = !p.suspended && eligibleRank<qual;
+          if(!p.suspended)eligibleRank++;
+          const rowClass=willQualify?'row-blue':'';
+          const dqTag=p.suspended?`<span style="font-size:9px;font-weight:800;color:#fff;background:var(--red);border-radius:5px;padding:1px 6px;margin-left:5px">🚫 DISQUALIFIED</span>`:'';
+          return`<tr class="${rowClass}" onclick="openProfileByName('${encodeURIComponent(p.name)}')" style="${p.suspended?'opacity:0.55':''}">
             <td><span class="s-rank ${i===0?'g':''}">${i===0?'👑':i+1}</span></td>
-            <td style="text-align:left"><div style="display:flex;align-items:center;gap:10px">${getMiniAv(p.id,t,db)}<span style="font-weight:800;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:110px">${p.name}</span>${redsWarningHtml(p)}</div></td>
+            <td style="text-align:left"><div style="display:flex;align-items:center;gap:10px">${getMiniAv(p.id,t,db)}<span style="font-weight:800;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:110px">${p.name}</span>${redsWarningHtml(p)}${dqTag}</div></td>
             <td style="font-weight:700;color:var(--sub)">${p.PL}</td>
             <td style="font-weight:700;color:${p.GD>0?'var(--green)':p.GD<0?'var(--red)':'var(--sub)'}">${p.GD>0?'+':''}${p.GD}</td>
             <td style="font-family:'Bebas Neue',sans-serif;font-size:20px;color:var(--gold);text-shadow:0 0 10px rgba(240,180,41,0.2)">${p.PTS}</td>
@@ -1758,9 +1767,11 @@ function renderLeagueTable(t,content){
         <th>PTS</th>
       </tr>
     </thead>
-    <tbody>${sorted.map((p,i)=>{
+    <tbody>${(()=>{let topRank=0;return sorted.map((p,i)=>{
       let rowClass='';
-      if(i<topCount)rowClass='row-blue';
+      const getsAdvantage = !p.suspended && topRank<topCount;
+      if(!p.suspended)topRank++;
+      if(getsAdvantage)rowClass='row-blue';
       else if(i>=n-relegCount&&relegCount>0)rowClass='row-relegation';
       
       let formHTML = '';
@@ -1770,14 +1781,15 @@ function renderLeagueTable(t,content){
       } else {
           formHTML = '<div style="font-size:9px;color:var(--sub);font-weight:700">DUO</div>'; 
       }
+      const dqTag=p.suspended?`<span style="font-size:9px;font-weight:800;color:#fff;background:var(--red);border-radius:5px;padding:1px 6px;margin-left:5px">🚫 DISQUALIFIED</span>`:'';
 
-      return`<tr class="${rowClass}" onclick="openProfileByName('${encodeURIComponent(p.name)}')">
+      return`<tr class="${rowClass}" onclick="openProfileByName('${encodeURIComponent(p.name)}')" style="${p.suspended?'opacity:0.55':''}">
         <td><span class="s-rank ${i===0?'g':''}">${i===0?'👑':i+1}</span></td>
         <td style="text-align:left">
           <div style="display:flex;align-items:center;gap:10px">
             ${getMiniAv(p.id, t, db)}
             <span style="font-weight:800;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:110px">${p.name}</span>
-            ${redsWarningHtml(p)}
+            ${redsWarningHtml(p)}${dqTag}
           </div>
         </td>
         <td><div style="display:flex;gap:2px;justify-content:center">${formHTML}</div></td>
@@ -1785,7 +1797,7 @@ function renderLeagueTable(t,content){
         <td style="font-weight:700;color:${p.GD>0?'var(--green)':p.GD<0?'var(--red)':'var(--sub)'}">${p.GD>0?'+':''}${p.GD}</td>
         <td style="font-family:'Bebas Neue',sans-serif;font-size:20px;color:var(--gold);text-shadow:0 0 10px rgba(240,180,41,0.2)">${p.PTS}</td>
       </tr>`;
-    }).join('')}</tbody>
+    }).join('')})()}</tbody>
   </table>
   ${topCount>0?`<div style="display:flex;gap:12px;margin-top:16px;font-size:11px;font-weight:700;background:rgba(17,17,37,0.8);padding:12px;border-radius:12px;border:1px solid var(--border);justify-content:center">
     <span style="color:var(--blue)">🔵 Top ${topCount} — Home Advantage</span>
@@ -2857,7 +2869,7 @@ function confirmEnd(){
     const finalMatch=t.bracket[t.bracket.length-1][0];
     winner=t.standings.find(s=>s.id===finalMatch.winner);
   } else {
-    winner=sortedStandings(t)[0];
+    winner=sortedStandings(t).find(s=>!s.suspended);
   }
   const bootNames=topScorerIds.map(pid=>{const p=db.players.find(x=>x.id===pid);return p?p.name:'';}).filter(Boolean);
 
@@ -2907,7 +2919,9 @@ async function endCup(){
       }
       winner = t.standings.find(s => s.id === finalMatch.winner);
   } else {
-      winner = sortedStandings(t)[0];
+      // 🐛 FIX: a disqualified (3+ red cards) team must never be crowned
+      // champion just because they had the most points before being suspended.
+      winner = sortedStandings(t).find(s => !s.suspended);
   }
   if(!winner) { closeConf(); snack('⚠️ Could not determine a winner!'); if(btn){btn.innerHTML='End Cup';btn.style.pointerEvents='auto';} return; }
 
@@ -3157,7 +3171,7 @@ function revertTournamentEndEffects(db,t){
     const finalMatch=t.bracket[t.bracket.length-1][0];
     if(finalMatch&&finalMatch.winner)winner=t.standings.find(s=>s.id===finalMatch.winner);
   } else {
-    winner=sortedStandings(t)[0]||null;
+    winner=sortedStandings(t).find(s=>!s.suspended)||null;
   }
 
   (t.standings||[]).forEach(entry=>{
@@ -3715,7 +3729,7 @@ function openProfile(idx,canEdit=false){
       const finalMatch=t.bracket[t.bracket.length-1][0];
       if(finalMatch&&finalMatch.winner)winner=t.standings.find(s=>s.id===finalMatch.winner);
     } else {
-      winner=sortedStandings(t)[0]||null;
+      winner=sortedStandings(t).find(s=>!s.suspended)||null;
     }
     if(!winner)return;
     const winPids=t.type==='1v1'?[winner.id]:[winner.proId,winner.youthId].filter(Boolean);
@@ -4441,7 +4455,7 @@ function renderPastTournamentsRecord(db){
       const finalMatch=t.bracket[t.bracket.length-1][0];
       if(finalMatch&&finalMatch.winner)winner=t.standings.find(s=>s.id===finalMatch.winner);
     } else {
-      winner=sortedStandings(t)[0]||null;
+      winner=sortedStandings(t).find(s=>!s.suspended)||null;
     }
     const champion=winner?winner.name:'—';
 
