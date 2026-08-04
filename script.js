@@ -377,7 +377,7 @@ function enterApp(){
     showScreen('screen-app');
     renderUserBadge();
     showTab('arena');
-    initPullToRefresh();
+    initPullToRefresh('screen-app', ()=>document.querySelector('.tab-content.active'));
     getTodaysQuests().then(()=>{ if(document.getElementById('tab-locker')?.classList.contains('active'))renderLocker(); });
     // START MUSIC — wait for the (now dynamic) playlist to finish loading
     // from Supabase before trying to play anything.
@@ -387,23 +387,28 @@ function enterApp(){
 // ============================================================
 // PULL TO REFRESH — drag down from the top of any tab to sync.
 // Built at runtime (no index.html/style.css changes needed).
+// 🐛 FIX: this used to be hardcoded to #screen-app only, so pulling down
+// on the Tournament Detail screen (#screen-tournament) silently did
+// nothing — there was no listener there at all. Generalized to accept
+// any screen id + a function that finds that screen's own scrollable
+// content element, so it can be wired up to BOTH screens.
 // ============================================================
-function initPullToRefresh(){
-  const screen=document.getElementById('screen-app');
+function initPullToRefresh(screenId,getScroller){
+  const screen=document.getElementById(screenId);
   if(!screen||screen._ptrInit)return;
   screen._ptrInit=true;
-  // Note: #screen-app already has position:absolute via style.css, which
+  // Note: .screen already has position:absolute via style.css, which
   // already establishes a containing block for our absolutely-positioned
   // indicator below — no need to (and must not) override it here.
 
   const indicator=document.createElement('div');
-  indicator.id='pull-refresh-indicator';
+  indicator.id='pull-refresh-indicator-'+screenId;
   indicator.textContent='🔄';
   indicator.style.cssText='position:absolute;top:0;left:50%;transform:translate(-50%,-40px);z-index:60;font-size:20px;pointer-events:none;opacity:0;filter:drop-shadow(0 2px 6px rgba(0,0,0,0.4))';
   screen.prepend(indicator);
 
   let startY=0,pulling=false,triggered=false;
-  const activeScrollTop=()=>document.querySelector('.tab-content.active')?.scrollTop||0;
+  const activeScrollTop=()=>getScroller()?.scrollTop||0;
 
   screen.addEventListener('touchstart',e=>{
     if(activeScrollTop()>0)return;
@@ -1393,7 +1398,7 @@ async function createFriendlyChallenge(){
 // ============================================================
 // TOURNAMENT SCREEN — Updated to show Qualify button
 // ============================================================
-function openTournament(idx){activeTournIdx=idx;renderTournamentScreen();showScreen('screen-tournament')}
+function openTournament(idx){activeTournIdx=idx;renderTournamentScreen();showScreen('screen-tournament');initPullToRefresh('screen-tournament', ()=>document.querySelector('.t-scr-body'))}
 function backToApp(){activeTournIdx=null;showScreen('screen-app');renderArena()}
 function getTournament(){if(activeTournIdx===null)return null;return getDB().tournaments[activeTournIdx]}
 
@@ -1682,6 +1687,7 @@ function renderStandings(){
     document.getElementById('standings-sub-hdr').textContent='🌳 Bracket';
     content.innerHTML=`<div class="bracket-scroll"><div class="bracket-container" id="bracket-inner"></div></div>`;
     renderBracket(t);
+    enableDragScroll(content.querySelector('.bracket-scroll'));
   } else if(t.phase==='groups'&&t.groups){
     document.getElementById('standings-sub-hdr').textContent='🧩 Group Stage';
     renderGroupsStandings(t,content);
@@ -1803,6 +1809,49 @@ function renderLeagueTable(t,content){
     <span style="color:var(--blue)">🔵 Top ${topCount} — Home Advantage</span>
     ${relegCount>0?`<span style="color:var(--red)">🔴 Relegation Zone</span>`:''}
   </div>`:''}`;
+}
+
+// ============================================================
+// NATURAL DRAG-TO-SCROLL — lets the player just grab anywhere inside
+// the bracket and swipe left/right with their finger or mouse, exactly
+// like scrolling anywhere else in the app. No button needed: this makes
+// the horizontal scroll itself more forgiving than relying purely on the
+// browser's native touch-scroll detection (which can be finicky when a
+// horizontally-scrolling area sits inside a vertically-scrolling page).
+// Re-attached every time the bracket re-renders (its DOM is rebuilt).
+// ============================================================
+function enableDragScroll(el){
+  if(!el)return;
+  let isDown=false,startX=0,startScroll=0,moved=false,pointerId=null;
+
+  el.addEventListener('pointerdown',e=>{
+    // Ignore multi-touch gestures (pinch-zoom etc.) — only track one pointer.
+    if(pointerId!==null)return;
+    isDown=true;moved=false;pointerId=e.pointerId;
+    startX=e.clientX;startScroll=el.scrollLeft;
+    el.setPointerCapture(e.pointerId);
+  });
+  el.addEventListener('pointermove',e=>{
+    if(!isDown||e.pointerId!==pointerId)return;
+    const dx=e.clientX-startX;
+    if(Math.abs(dx)>4)moved=true;
+    el.scrollLeft=startScroll-dx;
+  });
+  const release=e=>{
+    if(e.pointerId!==pointerId)return;
+    isDown=false;pointerId=null;
+    // Swallow the click that would otherwise fire on whatever was under
+    // the finger/cursor at release, so a drag-swipe never accidentally
+    // opens a match card as if it were tapped.
+    if(moved){
+      const swallowClick=ev=>{ev.stopPropagation();ev.preventDefault();};
+      el.addEventListener('click',swallowClick,{capture:true,once:true});
+      setTimeout(()=>el.removeEventListener('click',swallowClick,{capture:true}),0);
+    }
+  };
+  el.addEventListener('pointerup',release);
+  el.addEventListener('pointercancel',release);
+  el.style.cursor='grab';
 }
 
 // ============================================================
