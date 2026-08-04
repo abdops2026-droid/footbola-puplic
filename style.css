@@ -220,7 +220,7 @@ body{display:flex;justify-content:center;align-items:stretch;font-family:'Rajdha
 .back-btn:active{opacity:0.6}
 .t-scr-name{font-family:'Bebas Neue',sans-serif;font-size:32px;letter-spacing:2px}
 .t-scr-meta{font-size:12px;color:var(--sub);margin-top:3px;font-weight:500}
-.t-scr-body{flex:1;overflow-y:auto;padding-bottom:32px}
+.t-scr-body{flex:1;overflow-y:auto;padding-bottom:32px;-webkit-overflow-scrolling:touch}
 .standings-wrap{padding:18px 14px 10px}
 .sub-hdr{font-size:10px;font-weight:700;letter-spacing:2px;color:var(--sub);text-transform:uppercase;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between}
 
@@ -312,6 +312,8 @@ body{display:flex;justify-content:center;align-items:stretch;font-family:'Rajdha
    ============================================================ */
 .bracket-scroll {
   overflow-x: auto;
+  touch-action: pan-x;
+  -webkit-overflow-scrolling: touch;
   padding: 30px 20px;
   background: radial-gradient(circle at center, rgba(240,180,41,0.04) 0%, transparent 70%);
 }
